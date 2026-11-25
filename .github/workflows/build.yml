@@ -58,9 +58,10 @@ jobs:
           if-no-files-found: error
 
       - name: Publish release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
+        id: rel1
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         continue-on-error: true
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: Hys1Link build ${{ github.run_number }}
@@ -68,4 +69,15 @@ jobs:
             Automatic build from ${{ github.sha }}.
             Install the APK, then link it from Link → Settings → Linked devices.
           files: out/*.apk
+          fail_on_unmatched_files: true
           prerelease: true
+
+      - name: Publish release (retry)
+        if: steps.rel1.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 20
+          gh release view "build-${GITHUB_RUN_NUMBER}" >/dev/null 2>&1 || \
+            gh release create "build-${GITHUB_RUN_NUMBER}" --prerelease --title "Hys1Link build ${GITHUB_RUN_NUMBER}" --notes "Automatic build from ${GITHUB_SHA}."
+          gh release upload "build-${GITHUB_RUN_NUMBER}" out/*.apk --clobber
