@@ -166,7 +166,8 @@ class Linker(private val core: Core) {
             } catch (e2: ApiException) {
                 if (e2.code != 409) throw e2
                 throw IllegalStateException(
-                    "Сервер отклонил устройство (409): у аккаунта есть возможность, которую клиент не заявил.\n" +
+                    "Сервер отклонил устройство (409).\n" +
+                    "User-Agent: ${LinkConfig.USER_AGENT}\n" +
                     "Отправлено: ${caps.filterValues { it == true }.keys.joinToString()}\n" +
                     "Найдено в профиле: ${discovered.joinToString().ifEmpty { "ничего" }}\n" +
                     "Ответ сервера: ${e2.body?.take(300).orEmpty().ifEmpty { "(пусто)" }}"
