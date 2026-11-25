@@ -47,6 +47,9 @@ jobs:
           mkdir -p out
           cp app/build/outputs/apk/release/app-release.apk "out/Hys1Link-${GITHUB_RUN_NUMBER}.apk"
           ls -la out
+          echo "## APK contents" >> "$GITHUB_STEP_SUMMARY"
+          unzip -l out/*.apk | grep -E '\.so$|classes.*\.dex' | tee -a "$GITHUB_STEP_SUMMARY"
+          unzip -l out/*.apk | grep -q 'lib/arm64-v8a/libsignal_jni.so' || { echo "::error::libsignal_jni.so missing from APK"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -57,6 +60,7 @@ jobs:
       - name: Publish release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
+        continue-on-error: true
         with:
           tag_name: build-${{ github.run_number }}
           name: Hys1Link build ${{ github.run_number }}
