@@ -133,6 +133,21 @@ fun SettingsScreen(core: Core, onBack: () -> Unit, onThemeChanged: () -> Unit) {
             }, shape = RoundedCornerShape(14.dp)) { Text("Запросить контакты и группы") }
             syncNote?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp)) }
 
+            Section("Журнал сбоев")
+            var crash by remember { mutableStateOf(io.github.kotbctakahe.hys1link.core.CrashLog.read(core.context)) }
+            if (crash == null) Text("Сбоев не было.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            else {
+                val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+                androidx.compose.foundation.text.selection.SelectionContainer {
+                    Text(crash!!.take(4000), style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(12.dp))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 8.dp)) {
+                    OutlinedButton(onClick = { clip.setText(androidx.compose.ui.text.AnnotatedString(crash!!)) }, shape = RoundedCornerShape(14.dp)) { Text("Копировать") }
+                    TextButton(onClick = { io.github.kotbctakahe.hys1link.core.CrashLog.clear(core.context); crash = null }) { Text("Очистить") }
+                }
+            }
+
             Section("Устройство")
             OutlinedButton(onClick = { confirmUnlink = true }, shape = RoundedCornerShape(14.dp)) {
                 Text("Отвязать и удалить данные", color = MaterialTheme.colorScheme.error)
@@ -161,8 +176,8 @@ fun SettingsScreen(core: Core, onBack: () -> Unit, onThemeChanged: () -> Unit) {
 
 @Composable
 private fun Section(title: String) {
-    Spacer(Modifier.height(24.dp))
-    Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+    Spacer(Modifier.height(28.dp))
+    Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
     Spacer(Modifier.height(10.dp))
 }
 

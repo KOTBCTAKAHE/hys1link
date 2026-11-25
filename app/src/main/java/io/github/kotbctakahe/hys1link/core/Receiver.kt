@@ -70,7 +70,7 @@ class Receiver(private val core: Core) {
                 SessionCipher(store, SignalProtocolAddress(sender!!, senderDevice)).decrypt(SignalMessage(content))
             EnvelopeType.PREKEY_BUNDLE -> {
                 val p = SessionCipher(store, SignalProtocolAddress(sender!!, senderDevice)).decrypt(PreKeySignalMessage(content))
-                core.scope.launchIo { core.keys.refreshPreKeys() }
+                core.scope.launchIo { runCatching { core.keys.refreshPreKeys() }.onFailure { Log.w(TAG, "prekey refresh failed", it) } }
                 p
             }
             EnvelopeType.UNIDENTIFIED_SENDER -> {
@@ -183,7 +183,7 @@ class Receiver(private val core: Core) {
             handleData(self, DataMessage.decode(dmMsg), env, outgoing = true, destination = dest)
         }
         s.msg(2)?.let { contacts ->
-            contacts.msg(1)?.let { blob -> core.scope.launchIo { syncContacts(AttachmentPointer.decode(blob)) } }
+            contacts.msg(1)?.let { blob -> core.scope.launchIo { runCatching { syncContacts(AttachmentPointer.decode(blob)) }.onFailure { Log.w(TAG, "contact sync failed", it); core.account.lastContactSync = System.currentTimeMillis() - 23 * 3600_000L } } }
         }
         s.msg(5)?.let { read -> core.repo.markReadByTimestamp(read.string(3) ?: return@let, read.long(2) ?: return@let) }
         s.all(5).drop(1).forEach { f -> f.asMessage().let { r -> core.repo.markReadByTimestamp(r.string(3) ?: return@let, r.long(2) ?: return@let) } }

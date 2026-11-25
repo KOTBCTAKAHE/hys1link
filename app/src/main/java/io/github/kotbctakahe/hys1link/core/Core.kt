@@ -10,6 +10,7 @@ import io.github.kotbctakahe.hys1link.service.Notifications
 import io.github.kotbctakahe.hys1link.store.Db
 import io.github.kotbctakahe.hys1link.store.ProtocolStore
 import io.github.kotbctakahe.hys1link.store.Repo
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,7 +27,11 @@ fun CoroutineScope.launchIo(block: suspend CoroutineScope.() -> Unit): Job = lau
 /** Process-wide wiring of the client. */
 @SuppressLint("StaticFieldLeak")
 class Core private constructor(val context: Context) {
-    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** Background work must never take the process down (a crash restarts the service in a loop). */
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, e ->
+        Log.e("Core", "background task failed", e)
+        CrashLog.record(context, "background", e)
+    })
     val db = Db(context)
     val repo = Repo(db)
     val account = Account(db)

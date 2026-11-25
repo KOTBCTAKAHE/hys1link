@@ -11,6 +11,7 @@ import io.github.kotbctakahe.hys1link.net.Http
 class App : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
+        io.github.kotbctakahe.hys1link.core.CrashLog.install(this)
         Core.get(this)
     }
 

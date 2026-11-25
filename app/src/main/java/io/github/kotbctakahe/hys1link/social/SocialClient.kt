@@ -58,11 +58,22 @@ class SocialClient(private val core: Core) {
         val t = core.http.newCall(req).execute().use { r ->
             val body = r.body?.string()
             if (!r.isSuccessful) throw ApiException(r.code, body)
-            JSONObject(body ?: "{}").optString("token").takeIf { it.isNotBlank() } ?: error("Сервер не выдал токен соцсети")
+            parseToken(body) ?: error("Сервер не выдал токен соцсети")
         }
         token = t
         core.db.putString("social_token", t)
         return t
+    }
+
+    /** Link's server answers either {"token":"…"} or a bare JSON string "eyJ…" (JWT). */
+    private fun parseToken(body: String?): String? {
+        val b = body?.trim().orEmpty()
+        if (b.isEmpty()) return null
+        return when (val v = runCatching { org.json.JSONTokener(b).nextValue() }.getOrNull()) {
+            is JSONObject -> v.optString("token").ifBlank { v.optJSONObject("data")?.optString("token") }?.takeIf { it.isNotBlank() }
+            is String -> v.takeIf { it.isNotBlank() }
+            else -> b.trim('"').takeIf { it.startsWith("ey") }
+        }
     }
 
     private fun bearer(): String = token ?: refreshToken()

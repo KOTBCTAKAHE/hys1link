@@ -14,7 +14,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import io.github.kotbctakahe.hys1link.R
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,8 +37,8 @@ private fun light(a: Accent) = lightColorScheme(
     primaryContainer = a.lightContainer, onPrimaryContainer = Color(0xFF0B201A),
     secondary = Color(0xFF4B635A), secondaryContainer = Color(0xFFCDE8DC), onSecondaryContainer = Color(0xFF082018),
     tertiary = Color(0xFF3F6375), tertiaryContainer = Color(0xFFC3E8FD),
-    background = Color(0xFFF3F6F4), onBackground = Color(0xFF17201D),
-    surface = Color(0xFFF3F6F4), onSurface = Color(0xFF17201D),
+    background = Color(0xFFEFF3F1), onBackground = Color(0xFF141C19),
+    surface = Color(0xFFEFF3F1), onSurface = Color(0xFF17201D),
     surfaceVariant = Color(0xFFDCE5E0), onSurfaceVariant = Color(0xFF404945),
     surfaceContainerLowest = Color.White, surfaceContainerLow = Color(0xFFEDF2EF),
     surfaceContainer = Color(0xFFE7EDEA), surfaceContainerHigh = Color(0xFFE1E8E4), surfaceContainerHighest = Color(0xFFDBE3DF),
@@ -48,8 +51,8 @@ private fun dark(a: Accent) = darkColorScheme(
     primaryContainer = a.darkContainer, onPrimaryContainer = Color(0xFFD5FFEE),
     secondary = Color(0xFFB2CCC1), secondaryContainer = Color(0xFF344C43), onSecondaryContainer = Color(0xFFCDE8DC),
     tertiary = Color(0xFFA7CCE0), tertiaryContainer = Color(0xFF264B5C),
-    background = Color(0xFF0F1715), onBackground = Color(0xFFDEE5E1),
-    surface = Color(0xFF0F1715), onSurface = Color(0xFFDEE5E1),
+    background = Color(0xFF0C1311), onBackground = Color(0xFFDEE5E1),
+    surface = Color(0xFF0C1311), onSurface = Color(0xFFDEE5E1),
     surfaceVariant = Color(0xFF3F4945), onSurfaceVariant = Color(0xFFBFC9C3),
     surfaceContainerLowest = Color(0xFF0A110F), surfaceContainerLow = Color(0xFF151E1B),
     surfaceContainer = Color(0xFF19221F), surfaceContainerHigh = Color(0xFF232D29), surfaceContainerHighest = Color(0xFF2E3834),
@@ -57,15 +60,33 @@ private fun dark(a: Accent) = darkColorScheme(
     error = Color(0xFFFFB4AB),
 )
 
+/** Onest (OFL) — designed with Cyrillic in mind, also covers Turkmen Latin (ň, ý, ž, ş, ä). */
+val Onest = FontFamily(
+    Font(R.font.onest_regular, FontWeight.Normal),
+    Font(R.font.onest_medium, FontWeight.Medium),
+    Font(R.font.onest_semibold, FontWeight.SemiBold),
+    Font(R.font.onest_bold, FontWeight.Bold),
+)
+
 val AppTypography = Typography().let { t ->
+    fun TextStyle.o(w: FontWeight? = null, ls: Float? = null) =
+        copy(fontFamily = Onest, fontWeight = w ?: fontWeight, letterSpacing = ls?.sp ?: letterSpacing)
     t.copy(
-        displaySmall = t.displaySmall.copy(fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp),
-        headlineLarge = t.headlineLarge.copy(fontWeight = FontWeight.SemiBold, letterSpacing = (-0.6).sp),
-        headlineMedium = t.headlineMedium.copy(fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp),
-        titleLarge = t.titleLarge.copy(fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp),
-        titleMedium = t.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 22.sp),
-        labelLarge = t.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+        displayLarge = t.displayLarge.o(FontWeight.Bold, -1.2f),
+        displayMedium = t.displayMedium.o(FontWeight.Bold, -1f),
+        displaySmall = t.displaySmall.o(FontWeight.Bold, -0.8f),
+        headlineLarge = t.headlineLarge.o(FontWeight.Bold, -0.8f),
+        headlineMedium = t.headlineMedium.o(FontWeight.Bold, -0.6f),
+        headlineSmall = t.headlineSmall.o(FontWeight.SemiBold, -0.3f),
+        titleLarge = t.titleLarge.o(FontWeight.SemiBold, -0.3f),
+        titleMedium = t.titleMedium.o(FontWeight.SemiBold, -0.1f),
+        titleSmall = t.titleSmall.o(FontWeight.SemiBold),
+        bodyLarge = TextStyle(fontFamily = Onest, fontSize = 16.sp, lineHeight = 23.sp),
+        bodyMedium = t.bodyMedium.o(),
+        bodySmall = t.bodySmall.o(),
+        labelLarge = t.labelLarge.o(FontWeight.SemiBold),
+        labelMedium = t.labelMedium.o(FontWeight.Medium),
+        labelSmall = t.labelSmall.o(FontWeight.Medium),
     )
 }
 

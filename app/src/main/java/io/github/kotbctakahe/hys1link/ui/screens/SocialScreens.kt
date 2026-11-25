@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -91,6 +92,8 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import io.github.kotbctakahe.hys1link.core.Core
+import io.github.kotbctakahe.hys1link.ui.DockClearance
+import androidx.compose.material.icons.rounded.Settings
 import io.github.kotbctakahe.hys1link.net.ApiException
 import io.github.kotbctakahe.hys1link.net.Http
 import io.github.kotbctakahe.hys1link.social.SComment
@@ -189,7 +192,7 @@ fun FeedScreen(core: Core, onOpenPost: (String) -> Unit, onOpenUser: (ProfileKey
     Scaffold(topBar = {
         TopAppBar(title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Лента", style = MaterialTheme.typography.headlineMedium)
+                Text("Лента", style = MaterialTheme.typography.displaySmall)
                 Spacer(Modifier.width(16.dp))
                 FeedTab("Подписки", !forYou) { forYou = false }
                 Spacer(Modifier.width(6.dp))
@@ -198,7 +201,7 @@ fun FeedScreen(core: Core, onOpenPost: (String) -> Unit, onOpenUser: (ProfileKey
         })
     }) { pad ->
         PullToRefreshBox(isRefreshing = loading && posts.isEmpty(), onRefresh = { load(true) }, modifier = Modifier.padding(pad).fillMaxSize()) {
-            LazyColumn(state = list, contentPadding = PaddingValues(bottom = 24.dp)) {
+            LazyColumn(state = list, contentPadding = PaddingValues(top = 4.dp, bottom = DockClearance + 16.dp)) {
                 if (posts.isEmpty() && error != null) item { CenterMessage("Лента не загрузилась", error) { load(true) } }
                 else if (posts.isEmpty() && !loading) item {
                     CenterMessage(if (forYou) "Рекомендаций пока нет" else "Здесь появятся посты тех, на кого вы подписаны", "Найдите людей во вкладке «Поиск».")
@@ -247,13 +250,15 @@ private fun AuthorRow(u: SUser?, ts: Long, onOpenUser: (ProfileKey) -> Unit, lig
 @Composable
 fun PostCard(core: Core, p: SPost, onOpenPost: (() -> Unit)?, onOpenUser: (ProfileKey) -> Unit, onChanged: (SPost) -> Unit) {
     val scope = rememberCoroutineScope()
-    Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(26.dp))
+        .background(MaterialTheme.colorScheme.surfaceContainerLowest).padding(bottom = 12.dp)) {
         AuthorRow(p.author, p.createdAt, onOpenUser)
         if (p.medias.isNotEmpty()) {
             val ratio = p.medias.first().aspect.coerceIn(0.8f, 1.91f)
             val pager = rememberPagerState { p.medias.size }
             Box {
-                HorizontalPager(pager, Modifier.fillMaxWidth().aspectRatio(ratio).background(MaterialTheme.colorScheme.surfaceContainerHigh)) { i ->
+                HorizontalPager(pager, Modifier.padding(horizontal = 8.dp).fillMaxWidth().aspectRatio(ratio).clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)) { i ->
                     val m = p.medias[i]
                     Box(Modifier.fillMaxSize().clickable(enabled = onOpenPost != null) { onOpenPost?.invoke() }, contentAlignment = Alignment.Center) {
                         AsyncImage(m.imageUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -357,9 +362,9 @@ fun ReelsScreen(core: Core, onOpenUser: (ProfileKey) -> Unit, onOpenPost: (Strin
                     factory = { c -> PlayerView(c).apply { useController = false; resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM; setShutterBackgroundColor(android.graphics.Color.TRANSPARENT) } },
                     update = { it.player = player }, modifier = Modifier.fillMaxSize().clickable { player.playWhenReady = !player.playWhenReady },
                 )
-                Box(Modifier.fillMaxWidth().height(260.dp).align(Alignment.BottomCenter)
+                Box(Modifier.fillMaxWidth().height(340.dp).align(Alignment.BottomCenter)
                     .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f)))))
-                Row(Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(bottom = 12.dp), verticalAlignment = Alignment.Bottom) {
+                Row(Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(bottom = DockClearance), verticalAlignment = Alignment.Bottom) {
                     Column(Modifier.weight(1f)) {
                         AuthorRow(p.author, 0, onOpenUser, light = true)
                         p.description?.takeIf { it.isNotBlank() }?.let {
@@ -407,8 +412,8 @@ fun SearchScreen(core: Core, onOpenUser: (ProfileKey) -> Unit) {
             busy = false
         }
     }
-    Scaffold(topBar = { TopAppBar(title = { Text("Поиск", style = MaterialTheme.typography.headlineMedium) }) }) { pad ->
-        LazyColumn(contentPadding = pad) {
+    Scaffold(topBar = { TopAppBar(title = { Text("Поиск", style = MaterialTheme.typography.displaySmall) }) }) { pad ->
+        LazyColumn(contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = DockClearance + 16.dp)) {
             item {
                 TextField(query, { query = it }, placeholder = { Text("Имя или @username") }, singleLine = true,
                     leadingIcon = { Icon(Icons.Rounded.Search, null) },
@@ -439,7 +444,7 @@ fun SearchScreen(core: Core, onOpenUser: (ProfileKey) -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SocialProfileScreen(core: Core, key: ProfileKey, onBack: (() -> Unit)?, onOpenPost: (String) -> Unit, onMessage: (String) -> Unit) {
+fun SocialProfileScreen(core: Core, key: ProfileKey, onBack: (() -> Unit)?, onOpenPost: (String) -> Unit, onMessage: (String) -> Unit, onSettings: (() -> Unit)? = null) {
     var profile by remember { mutableStateOf<SProfile?>(null) }
     val posts = remember { mutableStateListOf<SPost>() }
     var cursor by remember { mutableStateOf<String?>(null) }
@@ -463,10 +468,11 @@ fun SocialProfileScreen(core: Core, key: ProfileKey, onBack: (() -> Unit)?, onOp
 
     Scaffold(topBar = {
         TopAppBar(title = { Text(profile?.username?.let { "@$it" } ?: "Профиль") },
-            navigationIcon = { if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Назад") } })
+            navigationIcon = { if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Назад") } },
+            actions = { if (onSettings != null) IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, "Настройки") } })
     }) { pad ->
         val pr = profile
-        LazyVerticalGrid(GridCells.Fixed(3), contentPadding = pad, horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        LazyVerticalGrid(GridCells.Fixed(3), contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = if (onBack == null) DockClearance + 16.dp else 16.dp), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             item(span = { GridItemSpan(3) }) {
                 when {
                     pr == null && error != null -> CenterMessage("Профиль не загрузился", error) { scope.launch { load() } }
@@ -498,24 +504,27 @@ fun SocialProfileScreen(core: Core, key: ProfileKey, onBack: (() -> Unit)?, onOp
 @Composable
 private fun ProfileHeader(core: Core, p: SProfile, counts: Triple<Long, Long, Long>?, onMessage: (String) -> Unit, onChanged: (SProfile) -> Unit) {
     val scope = rememberCoroutineScope()
-    Column(Modifier.fillMaxWidth().padding(20.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            NetAvatar(p.avatar, p.display, p.id.toString(), 84.dp)
-            Spacer(Modifier.width(18.dp))
+    val scheme = MaterialTheme.colorScheme
+    Box(Modifier.fillMaxWidth().height(118.dp).padding(horizontal = 12.dp).clip(RoundedCornerShape(28.dp))
+        .background(Brush.linearGradient(listOf(scheme.primary, scheme.tertiary.copy(alpha = 0.85f), scheme.primaryContainer))))
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 16.dp)) {
+        Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(top = 0.dp)) {
+            Box(Modifier.offset(y = (-44).dp).size(96.dp).clip(CircleShape).background(scheme.surface).padding(5.dp)) {
+                NetAvatar(p.avatar, p.display, p.id.toString(), 86.dp)
+            }
+            Spacer(Modifier.width(14.dp))
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceEvenly) {
                 Stat(counts?.first ?: p.posts.toLong(), "публикаций")
                 Stat(counts?.second ?: p.followers.toLong(), "подписчиков")
                 Stat(counts?.third ?: p.following.toLong(), "подписок")
             }
         }
-        Spacer(Modifier.height(12.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(p.display, style = MaterialTheme.typography.titleLarge)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.offset(y = (-30).dp)) {
+            Text(p.display, style = MaterialTheme.typography.headlineSmall)
             if (p.isVerified) { Spacer(Modifier.width(4.dp)); Icon(Icons.Rounded.Verified, "Подтверждён", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary) }
         }
-        p.description?.let { Spacer(Modifier.height(4.dp)); Text(it, style = MaterialTheme.typography.bodyMedium) }
+        p.description?.let { Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.offset(y = (-24).dp)) }
         if (!p.isSelf) {
-            Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (p.isFollowing) FilledTonalButton(onClick = {
                     onChanged(p.copy(isFollowing = false, followers = (p.followers - 1).coerceAtLeast(0)))

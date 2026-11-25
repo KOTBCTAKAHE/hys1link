@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -31,7 +33,8 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -54,6 +57,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.kotbctakahe.hys1link.core.Core
+import io.github.kotbctakahe.hys1link.ui.DockClearance
+import androidx.compose.ui.graphics.Color
 import io.github.kotbctakahe.hys1link.store.Contact
 import io.github.kotbctakahe.hys1link.store.ConvKind
 import io.github.kotbctakahe.hys1link.store.Conversation
@@ -84,61 +89,59 @@ fun ConnectionLine(core: Core) {
 fun ChatsScreen(core: Core, onOpen: (String) -> Unit, onNewChat: () -> Unit, onSettings: () -> Unit) {
     val version by core.db.version.collectAsState()
     var query by remember { mutableStateOf("") }
-    var searching by remember { mutableStateOf(false) }
     val convs by produceState(emptyList<Conversation>(), version) { value = withContext(Dispatchers.IO) { core.repo.conversations() } }
     val typing by core.receiver.typing.collectAsState()
     val shown = if (query.isBlank()) convs else convs.filter { it.title.contains(query, true) || it.lastBody?.contains(query, true) == true }
+    val scheme = MaterialTheme.colorScheme
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    if (searching) {
-                        TextField(
-                            value = query, onValueChange = { query = it }, placeholder = { Text("Поиск по чатам") },
-                            singleLine = true, modifier = Modifier.fillMaxWidth(),
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = MaterialTheme.colorScheme.surface, unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                                focusedIndicatorColor = MaterialTheme.colorScheme.surface, unfocusedIndicatorColor = MaterialTheme.colorScheme.surface,
-                            )
-                        )
-                    } else Column {
-                        Text("Чаты", style = MaterialTheme.typography.headlineMedium)
-                        ConnectionLine(core)
-                    }
-                },
-                navigationIcon = {
-                    if (searching) IconButton(onClick = { searching = false; query = "" }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Закрыть поиск") }
-                },
-                actions = {
-                    if (!searching) IconButton(onClick = { searching = true }) { Icon(Icons.Rounded.Search, "Поиск") }
-                    else if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Rounded.Close, "Очистить") }
+    Box(Modifier.fillMaxSize().background(scheme.surface)) {
+        Column(Modifier.fillMaxSize()) {
+            Column(Modifier.statusBarsPadding().padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Чаты", style = MaterialTheme.typography.displaySmall, modifier = Modifier.weight(1f))
                     IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, "Настройки") }
-                },
-            )
-        },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(onClick = onNewChat, icon = { Icon(Icons.Rounded.Edit, null) }, text = { Text("Написать") },
-                shape = RoundedCornerShape(20.dp))
-        }
-    ) { pad ->
-        if (shown.isEmpty()) {
-            EmptyChats(Modifier.padding(pad), query.isNotBlank())
-        } else LazyColumn(contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = 96.dp)) {
-            items(shown, key = { it.id }) { c ->
-                var menu by remember { mutableStateOf(false) }
-                Box {
-                    ConversationRow(c, typing[c.id]?.let { it > System.currentTimeMillis() } == true,
-                        Modifier.combinedClickable(onClick = { onOpen(c.id) }, onLongClick = { menu = true }))
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text(if (c.pinned) "Открепить" else "Закрепить") },
-                            onClick = { menu = false; core.repo.setPinned(c.id, !c.pinned) })
-                        DropdownMenuItem(text = { Text("Отметить прочитанным") }, onClick = { menu = false; core.repo.markConversationIncomingRead(c.id) })
-                        DropdownMenuItem(text = { Text("Удалить на этом устройстве") }, onClick = { menu = false; core.repo.deleteConversation(c.id) })
+                }
+                ConnectionLine(core)
+                Spacer(Modifier.height(14.dp))
+                TextField(
+                    value = query, onValueChange = { query = it }, placeholder = { Text("Поиск по чатам") },
+                    leadingIcon = { Icon(Icons.Rounded.Search, null) },
+                    trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Rounded.Close, "Очистить") } },
+                    singleLine = true, shape = RoundedCornerShape(20.dp),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = scheme.surfaceContainerHigh, unfocusedContainerColor = scheme.surfaceContainerHigh,
+                        focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+                    ),
+                    modifier = Modifier.fillMaxWidth().padding(end = 12.dp),
+                )
+            }
+            Surface(
+                shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp), color = scheme.surfaceContainerLowest,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                if (shown.isEmpty()) EmptyChats(Modifier, query.isNotBlank())
+                else LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = DockClearance + 80.dp)) {
+                    items(shown, key = { it.id }) { c ->
+                        var menu by remember { mutableStateOf(false) }
+                        Box {
+                            ConversationRow(c, typing[c.id]?.let { it > System.currentTimeMillis() } == true,
+                                Modifier.combinedClickable(onClick = { onOpen(c.id) }, onLongClick = { menu = true }))
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                DropdownMenuItem(text = { Text(if (c.pinned) "Открепить" else "Закрепить") },
+                                    onClick = { menu = false; core.repo.setPinned(c.id, !c.pinned) })
+                                DropdownMenuItem(text = { Text("Отметить прочитанным") }, onClick = { menu = false; core.repo.markConversationIncomingRead(c.id) })
+                                DropdownMenuItem(text = { Text("Удалить на этом устройстве") }, onClick = { menu = false; core.repo.deleteConversation(c.id) })
+                            }
+                        }
                     }
                 }
             }
         }
+        FloatingActionButton(
+            onClick = onNewChat, shape = RoundedCornerShape(22.dp),
+            containerColor = scheme.primary, contentColor = scheme.onPrimary,
+            modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 20.dp, bottom = DockClearance + 6.dp),
+        ) { Icon(Icons.Rounded.Edit, "Новый чат") }
     }
 }
 
@@ -158,8 +161,8 @@ private fun EmptyChats(modifier: Modifier, searching: Boolean) {
 
 @Composable
 private fun ConversationRow(c: Conversation, typing: Boolean, modifier: Modifier) {
-    Row(modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Avatar(c.title, c.peer ?: c.id, c.avatarPath, 54.dp,
+    Row(modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+        Avatar(c.title, c.peer ?: c.id, c.avatarPath, 56.dp,
             when (c.kind) { ConvKind.GROUP -> AvatarKind.GROUP; ConvKind.NOTE_TO_SELF -> AvatarKind.SELF; else -> AvatarKind.PERSON })
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {

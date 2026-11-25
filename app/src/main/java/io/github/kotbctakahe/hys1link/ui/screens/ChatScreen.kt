@@ -183,7 +183,12 @@ fun ChatScreen(core: Core, convId: String, onBack: () -> Unit) {
         val reversed = messages.asReversed()
         LazyColumn(
             state = listState, reverseLayout = true,
-            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLow),
+            modifier = Modifier.fillMaxSize().background(
+                androidx.compose.ui.graphics.Brush.verticalGradient(listOf(
+                    MaterialTheme.colorScheme.surfaceContainerLow,
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                ))
+            ),
             contentPadding = PaddingValues(top = pad.calculateTopPadding() + 8.dp, bottom = pad.calculateBottomPadding() + 8.dp, start = 10.dp, end = 10.dp),
         ) {
             itemsIndexed(reversed, key = { _, m -> m.id }) { i, m ->
@@ -217,7 +222,9 @@ private fun authorName(core: Core, m: Message): String =
 @Composable
 private fun DayChip(text: String) {
     Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
-        Text(text, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(text, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.85f))
+                .padding(horizontal = 12.dp, vertical = 4.dp))
     }
 }
 
@@ -231,9 +238,9 @@ private fun Bubble(
     var menu by remember { mutableStateOf(false) }
     val out = m.outgoing
     val scheme = MaterialTheme.colorScheme
-    val bg by animateColorAsState(if (out) scheme.primaryContainer else scheme.surfaceContainerLowest, label = "bubble")
-    val fg = if (out) scheme.onPrimaryContainer else scheme.onSurface
-    val big = 20.dp; val small = 6.dp
+    val bg by animateColorAsState(if (out) scheme.primary else scheme.surfaceContainerLowest, label = "bubble")
+    val fg = if (out) scheme.onPrimary else scheme.onSurface
+    val big = 22.dp; val small = 6.dp
     val shape = if (out) RoundedCornerShape(big, big, if (tail) small else big, big)
                 else RoundedCornerShape(big, big, big, if (tail) small else big)
 
@@ -241,7 +248,7 @@ private fun Bubble(
         Box {
             Column(horizontalAlignment = if (out) Alignment.End else Alignment.Start) {
                 Surface(
-                    shape = shape, color = bg, tonalElevation = 0.dp,
+                    shape = shape, color = bg, tonalElevation = 0.dp, shadowElevation = if (out) 0.dp else 1.dp,
                     modifier = Modifier.widthIn(max = 320.dp).clip(shape)
                         .combinedClickable(onClick = {}, onLongClick = { menu = true }, onDoubleClick = { onReact("❤️") })
                 ) {
@@ -305,7 +312,7 @@ private fun StatusIcon(status: Int, fg: Color) {
         else -> Icons.Rounded.ErrorOutline to "Не отправлено"
     }
     val tint = when (status) {
-        MsgStatus.READ -> MaterialTheme.colorScheme.primary
+        MsgStatus.READ -> fg
         MsgStatus.FAILED -> MaterialTheme.colorScheme.error
         else -> fg.copy(alpha = 0.6f)
     }
@@ -366,8 +373,9 @@ private fun Composer(
     draft: String, onDraft: (String) -> Unit, replyTo: Message?, replyAuthor: String?,
     onCancelReply: () -> Unit, onSend: () -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
-        Column(Modifier.navigationBarsPadding().imePadding()) {
+    Surface(color = Color.Transparent) {
+        Column(Modifier.navigationBarsPadding().imePadding().padding(horizontal = 8.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(30.dp)).background(MaterialTheme.colorScheme.surfaceContainerLowest)) {
             AnimatedVisibility(replyTo != null, enter = expandVertically(), exit = shrinkVertically()) {
                 Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.width(3.dp).height(36.dp).background(MaterialTheme.colorScheme.primary))
@@ -379,15 +387,15 @@ private fun Composer(
                     IconButton(onClick = onCancelReply) { Icon(Icons.Rounded.Close, "Отменить ответ") }
                 }
             }
-            Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
+            Row(Modifier.padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.Bottom) {
                 TextField(
                     value = draft, onValueChange = onDraft, placeholder = { Text("Сообщение") },
                     modifier = Modifier.weight(1f).heightIn(min = 52.dp, max = 160.dp),
                     shape = RoundedCornerShape(26.dp),
                     colors = TextFieldDefaults.colors(
                         focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
                     ),
                 )
                 Spacer(Modifier.width(8.dp))
