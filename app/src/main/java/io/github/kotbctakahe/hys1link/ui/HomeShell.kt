@@ -79,7 +79,7 @@ val DockClearance = 96.dp
 @Composable
 fun HomeShell(
     core: Core, openChat: (String) -> Unit, openNewChat: () -> Unit, openSettings: () -> Unit,
-    openPost: (String) -> Unit, openUser: (ProfileKey) -> Unit,
+    openPost: (String) -> Unit, openUser: (ProfileKey) -> Unit, openStory: (String) -> Unit = {},
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val version by core.db.version.collectAsState()
@@ -89,7 +89,7 @@ fun HomeShell(
     Box(Modifier.fillMaxSize()) {
         when (tab) {
             0 -> ChatsScreen(core, onOpen = openChat, onNewChat = openNewChat, onSettings = openSettings)
-            1 -> FeedScreen(core, onOpenPost = openPost, onOpenUser = openUser)
+            1 -> FeedScreen(core, onOpenPost = openPost, onOpenUser = openUser, onOpenStory = openStory)
             2 -> ReelsScreen(core, onOpenUser = openUser, onOpenPost = openPost)
             3 -> SearchScreen(core, onOpenUser = openUser)
             else -> SocialProfileScreen(core, ProfileKey(null, core.account.aci), onBack = null, onOpenPost = openPost,

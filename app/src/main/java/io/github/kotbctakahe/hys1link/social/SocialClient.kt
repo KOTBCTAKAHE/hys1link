@@ -149,6 +149,29 @@ class SocialClient(private val core: Core) {
         return list to d.optStr("cursor")
     }
 
+    // ---------- stories ----------
+    fun storiesTray(cursor: String? = null): Pair<List<STrayEntry>, String?> = StoryProto.tray(getProto("/api/v1/stories/tray", "cursor" to cursor, "limit" to 30))
+    fun storyReel(authorId: String): Pair<SUser?, List<SSegment>> = StoryProto.reel(getProto("/api/v1/stories/users/$authorId"))
+    fun recordStoryViews(items: List<SSegment>) {
+        if (items.isEmpty()) return
+        exec({ it.url(url("/api/v1/stories/views")).post(StoryProto.recordViews(items).toRequestBody(protoType)) }, true)
+    }
+    fun likeSegment(id: String, like: Boolean) {
+        exec({ b -> b.url(url("/api/v1/stories/segments/$id/like")).let { if (like) it.put(ByteArray(0).toRequestBody(protoType)) else it.delete() } }, true)
+    }
+
+    // ---------- chat requests ----------
+    fun chatRequests(): List<SChatRequest> {
+        val raw = getJson("/api/chat_requests/list", "Pagination.Limit" to 50)
+        val root = raw as? JSONObject
+        val d = root?.optJSONObject("data") ?: root
+        val arr = (raw as? JSONArray) ?: d?.optJSONArray("items") ?: root?.optJSONArray("data") ?: JSONArray()
+        return (0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.let { o -> SChatRequest(o.optLong("id"), o.optInt("status"), o.optJSONObject("user")?.let(::parseProfile)) } }
+    }
+    fun acceptChatRequest(id: Long) { postJson("/api/chat_requests/accept", JSONObject().put("id", id)) }
+    fun rejectChatRequest(id: Long) { postJson("/api/chat_requests/reject", JSONObject().put("id", id)) }
+    fun sendChatRequest(userId: Int) { postJson("/api/chat_requests/add", JSONObject().put("user_id", userId)) }
+
     // ---------- stickers (Link store) ----------
     fun stickerPacks(): List<io.github.kotbctakahe.hys1link.core.StickerPack> {
         fun parse(raw: Any): List<io.github.kotbctakahe.hys1link.core.StickerPack> {

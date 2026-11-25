@@ -2,6 +2,7 @@ package io.github.kotbctakahe.hys1link.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -63,7 +64,7 @@ fun safetyNumber(core: Core, peer: String): String? = runCatching {
         .displayableFingerprint.displayText.chunked(5).joinToString(" ")
 }.getOrNull()
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun InfoScreen(core: Core, convId: String, onBack: () -> Unit, onOpenUser: (ProfileKey) -> Unit, onOpenChat: (String) -> Unit, onDeleted: () -> Unit) {
     val version by core.db.version.collectAsState()
@@ -110,15 +111,19 @@ fun InfoScreen(core: Core, convId: String, onBack: () -> Unit, onOpenUser: (Prof
                 }
             }
             if (group != null) {
+                item { GroupAdminSection(core, c, onLeft = onDeleted) }
                 item { Text("Участники", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
                 items(group.members, key = { it.uuid }) { m ->
                     val ct = core.repo.contact(m.uuid)
                     val me = m.uuid == core.account.aci
-                    Row(Modifier.fillMaxWidth().clickable(enabled = !me) { onOpenChat(core.repo.ensureDirect(m.uuid, core.account.aci).id) }
+                    var actions by remember { mutableStateOf(false) }
+                    if (actions) MemberActionsDialog(core, c, m.uuid) { actions = false }
+                    Row(Modifier.fillMaxWidth().combinedClickable(enabled = !me, onLongClick = { actions = true }) { onOpenChat(core.repo.ensureDirect(m.uuid, core.account.aci).id) }
                         .padding(horizontal = 20.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Avatar(ct?.displayName ?: "?", m.uuid, ct?.avatarPath, 44.dp)
                         Spacer(Modifier.width(14.dp))
-                        Text(if (me) "Вы" else ct?.displayName ?: "Участник", style = MaterialTheme.typography.titleSmall)
+                        Text(if (me) "Вы" else ct?.displayName ?: "Участник", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        if (m.role == 2) Text("админ", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }

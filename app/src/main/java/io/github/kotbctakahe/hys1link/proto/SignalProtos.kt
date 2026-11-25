@@ -120,6 +120,8 @@ data class DataMessage(
     val mentions: List<Mention> = emptyList(),
     val previews: List<LinkPreview> = emptyList(),
     val viewOnce: Boolean = false,
+    val groupRevision: Int? = null,
+    val hasGroupChange: Boolean = false,
 ) {
     companion object {
         fun decode(m: ProtoMessage) = DataMessage(
@@ -141,6 +143,8 @@ data class DataMessage(
             // Preview: 1 url 2 title 3 image 4 description
             previews = m.all(10).mapNotNull { f -> f.asMessage().let { p -> p.string(1)?.let { LinkPreview(it, p.string(2), p.string(4), p.msg(3)?.let(AttachmentPointer::decode)) } } },
             viewOnce = m.bool(14) ?: false,
+            groupRevision = m.msg(15)?.int(2),
+            hasGroupChange = m.msg(15)?.has(3) == true,
         )
     }
 }
@@ -159,7 +163,7 @@ object Content {
     fun dataMessage(body: String?, timestamp: Long, profileKey: ByteArray?, groupMasterKey: ByteArray? = null,
                     groupRevision: Int? = null, quote: Quote? = null, attachments: List<OutAttachment> = emptyList(),
                     expireTimer: Int = 0, mentions: List<Mention> = emptyList(), viewOnce: Boolean = false,
-                    flags: Int? = null, deleteTarget: Long? = null): ProtoWriter {
+                    flags: Int? = null, deleteTarget: Long? = null, groupChange: ByteArray? = null): ProtoWriter {
         val dm = ProtoWriter().string(1, body?.takeIf { it.isNotEmpty() })
         attachments.forEach { dm.message(2, it.encode()) }
         dm.uint(4, flags)
@@ -167,7 +171,7 @@ object Content {
         mentions.forEach { dm.message(18, ProtoWriter().uint(1, it.start).uint(2, it.length).string(3, it.uuid)) }
         if (viewOnce) dm.bool(14, true)
         if (deleteTarget != null) dm.message(17, ProtoWriter().uint(1, deleteTarget))
-        if (groupMasterKey != null) dm.message(15, ProtoWriter().bytes(1, groupMasterKey).uint(2, groupRevision ?: 0))
+        if (groupMasterKey != null) dm.message(15, ProtoWriter().bytes(1, groupMasterKey).uint(2, groupRevision ?: 0).bytes(3, groupChange))
         dm.bytes(6, profileKey)
         if (quote != null) dm.message(8, ProtoWriter().uint(1, quote.id).string(5, quote.authorUuid).string(3, quote.text))
         dm.uint(7, timestamp)

@@ -86,7 +86,8 @@ class MainActivity : ComponentActivity() {
                                     openNewChat = { nav.navigate("new") },
                                     openSettings = { nav.navigate("settings") },
                                     openPost = { nav.navigate("post/" + URLEncoder.encode(it, "UTF-8")) },
-                                    openUser = { k -> nav.navigate(userRoute(k)) })
+                                    openUser = { k -> nav.navigate(userRoute(k)) },
+                                    openStory = { a -> nav.navigate("story/" + URLEncoder.encode(a, "UTF-8")) })
                             }
                             composable("post/{id}") { e ->
                                 PostScreen(core, URLDecoder.decode(e.arguments?.getString("id") ?: "", "UTF-8"), onBack = { nav.popBackStack() },
@@ -114,9 +115,23 @@ class MainActivity : ComponentActivity() {
                                     onDeleted = { nav.popBackStack("home", false) })
                             }
                             composable("new") {
-                                NewChatScreen(core, onBack = { nav.popBackStack() }) { id ->
+                                NewChatScreen(core, onBack = { nav.popBackStack() }, onOpen = { id ->
                                     nav.popBackStack(); nav.navigate("chat/" + URLEncoder.encode(id, "UTF-8"))
+                                }, onNewGroup = { nav.navigate("newgroup") }, onRequests = { nav.navigate("requests") })
+                            }
+                            composable("newgroup") {
+                                io.github.kotbctakahe.hys1link.ui.screens.CreateGroupScreen(core, onBack = { nav.popBackStack() }) { id ->
+                                    nav.popBackStack("home", false); nav.navigate("chat/" + URLEncoder.encode(id, "UTF-8"))
                                 }
+                            }
+                            composable("requests") {
+                                io.github.kotbctakahe.hys1link.ui.screens.ChatRequestsScreen(core, onBack = { nav.popBackStack() },
+                                    onOpenChat = { id -> nav.navigate("chat/" + URLEncoder.encode(id, "UTF-8")) },
+                                    onOpenUser = { k -> nav.navigate(userRoute(k)) })
+                            }
+                            composable("story/{id}") { e ->
+                                io.github.kotbctakahe.hys1link.ui.screens.StoryViewer(core, URLDecoder.decode(e.arguments?.getString("id") ?: "", "UTF-8"),
+                                    onClose = { nav.popBackStack() }, onOpenUser = { k -> nav.navigate(userRoute(k)) })
                             }
                             composable("settings") {
                                 SettingsScreen(core, onBack = { nav.popBackStack() }, onThemeChanged = { themeTick++ })

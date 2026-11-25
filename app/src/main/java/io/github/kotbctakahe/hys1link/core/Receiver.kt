@@ -168,6 +168,15 @@ class Receiver(private val core: Core) {
         } + listOfNotNull(dm.stickerAttachment?.let { a ->
             AttachmentInfo(a.contentType ?: "image/webp", STICKER_FILE, a.size, null, a.width, a.height, pointerJson(a))
         })
+        if (dm.groupMasterKey != null && (dm.hasGroupChange || (core.groups.cached(conv.id)?.revision ?: -1) < (dm.groupRevision ?: 0))) {
+            core.groups.refreshTitleAsync(conv, force = true)
+            if (dm.hasGroupChange && dm.body == null && dm.attachments.isEmpty()) {
+                val who = if (outgoing) "Вы" else repo.contact(sender)?.displayName ?: "Участник"
+                repo.insertSystem(conv.id, "$who изменил(а) группу", ts)
+                return
+            }
+        }
+        if (dm.groupMasterKey != null && dm.body == null && dm.attachments.isEmpty() && !dm.sticker && dm.reaction == null) return
         val body = dm.body ?: if (dm.sticker && dm.stickerAttachment == null) "🧩 ${dm.stickerEmoji ?: "Стикер"}" else null
         if (body.isNullOrEmpty() && atts.isEmpty()) return
 

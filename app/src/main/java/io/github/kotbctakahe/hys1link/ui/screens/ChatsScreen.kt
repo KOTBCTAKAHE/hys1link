@@ -199,7 +199,7 @@ private fun ConversationRow(c: Conversation, typing: Boolean, modifier: Modifier
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NewChatScreen(core: Core, onBack: () -> Unit, onOpen: (String) -> Unit) {
+fun NewChatScreen(core: Core, onBack: () -> Unit, onOpen: (String) -> Unit, onNewGroup: () -> Unit = {}, onRequests: () -> Unit = {}) {
     val version by core.db.version.collectAsState()
     var query by remember { mutableStateOf("") }
     val contacts by produceState(emptyList<Contact>(), version) { value = withContext(Dispatchers.IO) { core.repo.contacts() } }
@@ -220,6 +220,8 @@ fun NewChatScreen(core: Core, onBack: () -> Unit, onOpen: (String) -> Unit) {
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
                 )
             }
+            item { ContactRow("Новая группа", "newgroup", null, "Выберите участников и название", AvatarKind.GROUP) { onNewGroup() } }
+            item { ContactRow("Запросы на переписку", "requests", null, "Кто хочет написать вам из ленты", AvatarKind.PERSON) { onRequests() } }
             item {
                 ContactRow("Заметки", self ?: "self", null, "Сообщения себе — видны на всех ваших устройствах", AvatarKind.SELF) {
                     self?.let { onOpen(core.repo.ensureDirect(it, it).id) }

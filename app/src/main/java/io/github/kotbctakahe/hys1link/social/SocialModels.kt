@@ -135,3 +135,51 @@ data class SSearchUser(val id: Int, val username: String?, val profileName: Stri
 }
 
 data class SComment(val id: Long, val text: String, val createdAt: String?, val author: SProfile?, val repliesCount: Int, val isSelf: Boolean)
+
+
+// ---- stories (clientapi.stories.v1) ----
+data class STrayEntry(val author: SUser, val latest: Long, val hasUnseen: Boolean)
+data class SSegment(
+    val id: String, val authorId: String?, val kind: Int, val publishedAt: Long, val durationMs: Int,
+    val imageUrl: String?, val videoUrl: String?, val text: String?, val textBg: String?, val textColor: String?,
+    val caption: String?, val seen: Boolean, val viewCount: Long, val liked: Boolean,
+)
+
+object StoryProto {
+    private fun ts(m: ProtoMessage?): Long = m?.let { (it.long(1) ?: 0) * 1000 + (it.long(2) ?: 0) / 1_000_000 } ?: 0
+
+    /** TrayResponse: 1 entries[]{1 author 2 latest_ms 3 has_unseen} 2 next_cursor 3 has_more */
+    fun tray(b: ByteArray): Pair<List<STrayEntry>, String?> {
+        val m = ProtoMessage.parse(b)
+        return m.all(1).mapNotNull { f -> f.asMessage().let { e -> e.msg(1)?.let { STrayEntry(SUser.decode(it), e.long(2) ?: 0, e.bool(3) ?: false) } } } to m.string(2)
+    }
+
+    /** StoryReelResponse: 1 segments[] 2 author. SegmentView: 1 id 2 author_id 3 kind 6 published_at 8 duration_ms 10 media 11 text 12 caption 15 seen 17 view_count 19 liked */
+    fun reel(b: ByteArray): Pair<SUser?, List<SSegment>> {
+        val m = ProtoMessage.parse(b)
+        val segs = m.all(1).map { f ->
+            val s = f.asMessage()
+            val media = s.msg(10)
+            val rends = media?.all(5)?.map { it.asMessage().let { r -> Triple(r.string(2), r.int(3) ?: 0, r.int(4) ?: 0) } }.orEmpty()
+            val kind = s.int(3) ?: 0
+            val text = s.msg(11)
+            SSegment(
+                s.string(1) ?: "", s.string(2), kind, ts(s.msg(6)), s.int(8) ?: 0,
+                mediaUrl(media?.string(1) ?: rends.maxByOrNull { it.second * it.third }?.first),
+                if (kind == 2) mediaUrl(rends.firstOrNull { it.first?.contains(".m3u8") == true }?.first ?: rends.maxByOrNull { it.second * it.third }?.first) else null,
+                text?.string(1), text?.string(2), text?.string(5), s.string(12), s.bool(15) ?: false, s.long(17) ?: 0, s.bool(19) ?: false,
+            )
+        }
+        return m.msg(2)?.let(SUser::decode) to segs
+    }
+
+    /** RecordViewsRequest: 1 items[]{1 segment_id 2 author_id 3 published_ms 4 viewed_ms} */
+    fun recordViews(items: List<SSegment>): ByteArray {
+        val w = ProtoWriter()
+        val now = System.currentTimeMillis()
+        items.forEach { s -> w.message(1, ProtoWriter().string(1, s.id).string(2, s.authorId).uint(3, s.publishedAt).uint(4, now)) }
+        return w.toByteArray()
+    }
+}
+
+data class SChatRequest(val id: Long, val status: Int, val user: SProfile?)

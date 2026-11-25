@@ -152,7 +152,7 @@ private fun CenterMessage(title: String, body: String?, onRetry: (() -> Unit)? =
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FeedScreen(core: Core, onOpenPost: (String) -> Unit, onOpenUser: (ProfileKey) -> Unit) {
+fun FeedScreen(core: Core, onOpenPost: (String) -> Unit, onOpenUser: (ProfileKey) -> Unit, onOpenStory: (String) -> Unit = {}) {
     val posts = remember { mutableStateListOf<SPost>() }
     var cursor by remember { mutableStateOf<String?>(null) }
     var hasMore by remember { mutableStateOf(true) }
@@ -202,6 +202,7 @@ fun FeedScreen(core: Core, onOpenPost: (String) -> Unit, onOpenUser: (ProfileKey
     }) { pad ->
         PullToRefreshBox(isRefreshing = loading && posts.isEmpty(), onRefresh = { load(true) }, modifier = Modifier.padding(pad).fillMaxSize()) {
             LazyColumn(state = list, contentPadding = PaddingValues(top = 4.dp, bottom = DockClearance + 16.dp)) {
+                item(key = "stories") { StoriesRow(core, onOpenStory) }
                 if (posts.isEmpty() && error != null) item { CenterMessage("Лента не загрузилась", error) { load(true) } }
                 else if (posts.isEmpty() && !loading) item {
                     CenterMessage(if (forYou) "Рекомендаций пока нет" else "Здесь появятся посты тех, на кого вы подписаны", "Найдите людей во вкладке «Поиск».")
@@ -534,7 +535,12 @@ private fun ProfileHeader(core: Core, p: SProfile, counts: Triple<Long, Long, Lo
                     onChanged(p.copy(isFollowing = true, followers = p.followers + 1))
                     scope.launch(Dispatchers.IO) { runCatching { core.social.follow(p.id) } }
                 }, modifier = Modifier.weight(1f)) { Text("Подписаться") }
-                p.chatUuid?.let { u -> OutlinedButton(onClick = { onMessage(u) }, modifier = Modifier.weight(1f)) { Text("Написать") } }
+                if (p.chatUuid != null) OutlinedButton(onClick = { onMessage(p.chatUuid) }, modifier = Modifier.weight(1f)) { Text("Написать") }
+                else {
+                    var sent by remember { mutableStateOf(false) }
+                    OutlinedButton(enabled = !sent, onClick = { sent = true; scope.launch(Dispatchers.IO) { runCatching { core.social.sendChatRequest(p.id) } } },
+                        modifier = Modifier.weight(1f)) { Text(if (sent) "Запрос отправлен" else "Запросить чат") }
+                }
             }
         }
     }
