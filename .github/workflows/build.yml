@@ -64,13 +64,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: Hys1Link build ${{ github.run_number }}
+          name: Hys1Link 0.1.${{ github.run_number }}
           body: |
             Automatic build from ${{ github.sha }}.
             Install the APK, then link it from Link → Settings → Linked devices.
           files: out/*.apk
           fail_on_unmatched_files: true
-          prerelease: true
+          prerelease: false
+          make_latest: true
 
       - name: Publish release (retry)
         if: steps.rel1.outcome == 'failure'
@@ -79,5 +80,5 @@ jobs:
         run: |
           sleep 20
           gh release view "build-${GITHUB_RUN_NUMBER}" >/dev/null 2>&1 || \
-            gh release create "build-${GITHUB_RUN_NUMBER}" --prerelease --title "Hys1Link build ${GITHUB_RUN_NUMBER}" --notes "Automatic build from ${GITHUB_SHA}."
+            gh release create "build-${GITHUB_RUN_NUMBER}" --latest --title "Hys1Link 0.1.${GITHUB_RUN_NUMBER}" --notes "Automatic build from ${GITHUB_SHA}."
           gh release upload "build-${GITHUB_RUN_NUMBER}" out/*.apk --clobber
