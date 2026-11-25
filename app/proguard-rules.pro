@@ -1,0 +1,11 @@
+# libsignal calls back into Java/Kotlin through JNI by name
+-keep class org.signal.libsignal.** { *; }
+-keep interface org.signal.libsignal.** { *; }
+-keep class * implements org.signal.libsignal.protocol.state.SignalProtocolStore { *; }
+-keep class * implements org.signal.libsignal.protocol.groups.state.SenderKeyStore { *; }
+-keep class * implements org.signal.libsignal.protocol.logging.SignalProtocolLogger { *; }
+-dontwarn org.signal.libsignal.**
+-dontwarn okhttp3.internal.platform.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
