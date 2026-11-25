@@ -95,6 +95,7 @@ class Receiver(private val core: Core) {
 
     private fun handleContent(sender: String, senderDevice: Int, env: Envelope, c: ProtoMessage) {
         val self = core.account.aci
+        if (sender != self && core.repo.contact(sender)?.blocked == true) return // blocked: drop silently
         c.bytes(Content.SKDM)?.let { b ->
             runCatching {
                 GroupSessionBuilder(core.store!!).process(SignalProtocolAddress(sender, senderDevice), SenderKeyDistributionMessage(b))
@@ -128,7 +129,7 @@ class Receiver(private val core: Core) {
         } else core.repo.ensureDirect(peer, core.account.aci)
     }
 
-    private fun handleData(sender: String, dm: DataMessage, env: Envelope, outgoing: Boolean, destination: String?) {
+    private fun handleData(sender: String, dm: DataMessage, env: Envelope, outgoing: Boolean, destination: String?, expireStart: Long = 0) {
         val repo = core.repo
         val self = core.account.aci
         if (!outgoing && dm.profileKey != null && dm.profileKey.size == 32) {
@@ -154,6 +155,13 @@ class Receiver(private val core: Core) {
         if (dm.flags and 4 != 0) { // PROFILE_KEY_UPDATE
             return
         }
+        // Disappearing messages: every message carries the chat's timer; flag 2 = explicit change.
+        if (dm.flags and 2 != 0 || dm.expireTimer != conv.expireTimer) {
+            repo.setExpireTimer(conv.id, dm.expireTimer)
+            val who = if (outgoing) "Вы" else repo.contact(sender)?.displayName ?: "Собеседник"
+            repo.insertSystem(conv.id, if (dm.expireTimer > 0) "$who: исчезающие сообщения — ${timerLabel(dm.expireTimer)}" else "$who отключил(а) исчезающие сообщения", ts)
+            if (dm.flags and 2 != 0) return
+        }
 
         val atts = dm.attachments.map { a ->
             AttachmentInfo(a.contentType, a.fileName, a.size, null, a.width, a.height, pointerJson(a))
@@ -163,13 +171,20 @@ class Receiver(private val core: Core) {
         val body = dm.body ?: if (dm.sticker && dm.stickerAttachment == null) "🧩 ${dm.stickerEmoji ?: "Стикер"}" else null
         if (body.isNullOrEmpty() && atts.isEmpty()) return
 
+        val preview = dm.previews.firstOrNull()
         val id = repo.insertMessage(
             conv.id, sender, outgoing, body, ts,
             if (outgoing) MsgStatus.SENT else MsgStatus.RECEIVED, atts,
             quoteTs = dm.quote?.id, quoteAuthor = dm.quote?.authorUuid, quoteText = dm.quote?.text,
+            expiresIn = dm.expireTimer, expireStarted = if (outgoing && dm.expireTimer > 0) (expireStart.takeIf { it > 0 } ?: ts) else 0,
+            viewOnce = dm.viewOnce,
+            mentions = dm.mentions.map { io.github.kotbctakahe.hys1link.store.MentionInfo(it.start, it.length, it.uuid) },
+            preview = preview?.let { io.github.kotbctakahe.hys1link.store.PreviewInfo(it.url, it.title, it.description, null) },
         )
         if (id < 0) return
         if (atts.isNotEmpty()) core.attachments.autoDownload(id, atts)
+        preview?.image?.let { img -> core.scope.launchIo { runCatching { core.attachments.downloadPreview(id, img) } } }
+        dm.mentions.forEach { mm -> if (repo.contact(mm.uuid) == null) repo.upsertContact(mm.uuid) }
         if (!outgoing) {
             typing.value = typing.value - conv.id
             core.notifications.onIncoming(conv.id)
@@ -182,18 +197,27 @@ class Receiver(private val core: Core) {
         s.msg(1)?.let { sent ->
             val dmMsg = sent.msg(3) ?: return@let
             val dest = sent.string(7)
-            handleData(self, DataMessage.decode(dmMsg), env, outgoing = true, destination = dest)
+            handleData(self, DataMessage.decode(dmMsg), env, outgoing = true, destination = dest, expireStart = sent.long(4) ?: 0)
         }
         s.msg(2)?.let { contacts ->
             contacts.msg(1)?.let { blob -> core.scope.launchIo { runCatching { syncContacts(AttachmentPointer.decode(blob)) }.onFailure { Log.w(TAG, "contact sync failed", it); core.account.lastContactSync = System.currentTimeMillis() - 23 * 3600_000L } } }
         }
         s.msg(5)?.let { read -> core.repo.markReadByTimestamp(read.string(3) ?: return@let, read.long(2) ?: return@let) }
         s.all(5).drop(1).forEach { f -> f.asMessage().let { r -> core.repo.markReadByTimestamp(r.string(3) ?: return@let, r.long(2) ?: return@let) } }
-        s.msg(6)?.let { blocked -> blocked.all(3).forEach { core.repo.upsertContact(it.asString, blocked = true) } }
+        s.msg(11)?.let { vo -> core.repo.markViewOnceViewed(vo.string(3), vo.long(2) ?: return@let) }
+        s.msg(6)?.let { blocked ->
+            val now = blocked.all(3).map { it.asString }.toSet()
+            core.repo.blockedContacts().filter { it.uuid !in now }.forEach { core.repo.upsertContact(it.uuid, blocked = false) }
+            now.forEach { core.repo.upsertContact(it, blocked = true) }
+        }
         s.msg(13)?.let { keys -> Log.i(TAG, "received keys sync (${keys.fields.size} fields)") }
     }
 
-    private fun pointerJson(a: AttachmentPointer): String = JSONObject()
+    private fun timerLabel(sec: Int): String = when {
+        sec < 60 -> "$sec с"; sec < 3600 -> "${sec / 60} мин"; sec < 86400 -> "${sec / 3600} ч"; sec < 604800 -> "${sec / 86400} дн"; else -> "${sec / 604800} нед"
+    }
+
+    fun pointerJson(a: AttachmentPointer): String = JSONObject()
         .put("cdn", a.cdnNumber).put("id", a.cdnId?.toString()).put("key", a.cdnKey)
         .put("k", a.key?.let { B64.enc(it) }).put("d", a.digest?.let { B64.enc(it) })
         .toString()

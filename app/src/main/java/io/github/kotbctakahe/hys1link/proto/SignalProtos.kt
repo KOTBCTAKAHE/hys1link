@@ -97,6 +97,9 @@ data class OutAttachment(
         .uint(14, cdnNumber).string(15, cdnKey)
 }
 
+data class Mention(val start: Int, val length: Int, val uuid: String)
+data class LinkPreview(val url: String, val title: String?, val description: String?, val image: AttachmentPointer?)
+
 data class Quote(val id: Long, val authorUuid: String?, val text: String?)
 data class Reaction(val emoji: String, val remove: Boolean, val targetAuthorUuid: String?, val targetTimestamp: Long)
 
@@ -114,6 +117,9 @@ data class DataMessage(
     val sticker: Boolean,
     val stickerAttachment: AttachmentPointer? = null,
     val stickerEmoji: String? = null,
+    val mentions: List<Mention> = emptyList(),
+    val previews: List<LinkPreview> = emptyList(),
+    val viewOnce: Boolean = false,
 ) {
     companion object {
         fun decode(m: ProtoMessage) = DataMessage(
@@ -130,6 +136,11 @@ data class DataMessage(
             sticker = m.has(11),
             stickerAttachment = m.msg(11)?.msg(4)?.let { AttachmentPointer.decode(it) },
             stickerEmoji = m.msg(11)?.string(5),
+            // BodyRange: 1 start 2 length 3 mentionUuid
+            mentions = m.all(18).mapNotNull { f -> f.asMessage().let { r -> r.string(3)?.let { Mention(r.int(1) ?: 0, r.int(2) ?: 1, it) } } },
+            // Preview: 1 url 2 title 3 image 4 description
+            previews = m.all(10).mapNotNull { f -> f.asMessage().let { p -> p.string(1)?.let { LinkPreview(it, p.string(2), p.string(4), p.msg(3)?.let(AttachmentPointer::decode)) } } },
+            viewOnce = m.bool(14) ?: false,
         )
     }
 }
@@ -146,9 +157,16 @@ object Content {
     const val STORY = 9
 
     fun dataMessage(body: String?, timestamp: Long, profileKey: ByteArray?, groupMasterKey: ByteArray? = null,
-                    groupRevision: Int? = null, quote: Quote? = null, attachments: List<OutAttachment> = emptyList()): ProtoWriter {
+                    groupRevision: Int? = null, quote: Quote? = null, attachments: List<OutAttachment> = emptyList(),
+                    expireTimer: Int = 0, mentions: List<Mention> = emptyList(), viewOnce: Boolean = false,
+                    flags: Int? = null, deleteTarget: Long? = null): ProtoWriter {
         val dm = ProtoWriter().string(1, body?.takeIf { it.isNotEmpty() })
         attachments.forEach { dm.message(2, it.encode()) }
+        dm.uint(4, flags)
+        if (expireTimer > 0) dm.uint(5, expireTimer)
+        mentions.forEach { dm.message(18, ProtoWriter().uint(1, it.start).uint(2, it.length).string(3, it.uuid)) }
+        if (viewOnce) dm.bool(14, true)
+        if (deleteTarget != null) dm.message(17, ProtoWriter().uint(1, deleteTarget))
         if (groupMasterKey != null) dm.message(15, ProtoWriter().bytes(1, groupMasterKey).uint(2, groupRevision ?: 0))
         dm.bytes(6, profileKey)
         if (quote != null) dm.message(8, ProtoWriter().uint(1, quote.id).string(5, quote.authorUuid).string(3, quote.text))
@@ -156,10 +174,12 @@ object Content {
         return dm
     }
 
-    fun reaction(emoji: String, remove: Boolean, targetAuthor: String, targetTs: Long, timestamp: Long, profileKey: ByteArray?): ProtoWriter =
+    fun reaction(emoji: String, remove: Boolean, targetAuthor: String, targetTs: Long, timestamp: Long, profileKey: ByteArray?,
+                 groupMasterKey: ByteArray? = null, groupRevision: Int? = null): ProtoWriter =
         ProtoWriter()
             .message(16, ProtoWriter().string(1, emoji).bool(2, remove).string(4, targetAuthor).uint(5, targetTs))
             .bytes(6, profileKey).uint(7, timestamp)
+            .apply { if (groupMasterKey != null) message(15, ProtoWriter().bytes(1, groupMasterKey).uint(2, groupRevision ?: 0)) }
 
     fun withData(dm: ProtoWriter) = ProtoWriter().message(DATA, dm).toByteArray()
 
@@ -170,6 +190,15 @@ object Content {
 
     fun syncRequest(type: Int): ByteArray =
         ProtoWriter().message(SYNC, ProtoWriter().message(4, ProtoWriter().uint(1, type)).bytes(8, randomPadding())).toByteArray()
+
+    /** SyncMessage.Blocked: 1 numbers[] 3 uuids[] — full list replaces the primary's list. */
+    fun syncBlocked(uuids: List<String>, numbers: List<String>): ByteArray {
+        val b = ProtoWriter(); numbers.forEach { b.string(1, it) }; uuids.forEach { b.string(3, it) }
+        return ProtoWriter().message(SYNC, ProtoWriter().message(6, b)).toByteArray()
+    }
+
+    fun syncViewOnceOpen(senderUuid: String, timestamp: Long): ByteArray =
+        ProtoWriter().message(SYNC, ProtoWriter().message(11, ProtoWriter().string(3, senderUuid).uint(2, timestamp))).toByteArray()
 
     fun syncRead(senderUuid: String, timestamp: Long): ByteArray =
         ProtoWriter().message(SYNC, ProtoWriter().message(5, ProtoWriter().string(3, senderUuid).uint(2, timestamp))).toByteArray()

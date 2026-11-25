@@ -83,7 +83,8 @@ class Sender(private val core: Core) {
     // ---------------- high level ----------------
 
     /** A file the user picked, already read into memory. */
-    class LocalFile(val bytes: ByteArray, val contentType: String, val fileName: String?, val width: Int? = null, val height: Int? = null)
+    class LocalFile(val bytes: ByteArray, val contentType: String, val fileName: String?, val width: Int? = null, val height: Int? = null,
+                    val voice: Boolean = false)
 
     /** Encrypts and uploads via Link's v4 form + TUS; returns the pointer to put in DataMessage.attachments. */
     fun upload(f: LocalFile, caption: String? = null): io.github.kotbctakahe.hys1link.proto.OutAttachment {
@@ -92,20 +93,25 @@ class Sender(private val core: Core) {
         core.api.tusUpload(form, enc.blob)
         return io.github.kotbctakahe.hys1link.proto.OutAttachment(
             form.cdn, form.key, f.contentType, enc.key, enc.plaintextLength, enc.digest, f.fileName, f.width, f.height, caption,
+            flags = if (f.voice) 1 else null, // AttachmentPointer.Flags.VOICE_MESSAGE
         )
     }
 
     fun sendText(convId: String, body: String, quote: Quote? = null) = sendMessage(convId, body, emptyList(), quote)
 
     /** Sends text and/or attachments to a conversation (direct, note-to-self or group) and records it locally. */
-    fun sendMessage(convId: String, body: String?, files: List<LocalFile>, quote: Quote? = null, timestamp: Long = System.currentTimeMillis()) {
+    fun sendMessage(convId: String, body: String?, files: List<LocalFile>, quote: Quote? = null, timestamp: Long = System.currentTimeMillis(),
+                    mentions: List<io.github.kotbctakahe.hys1link.proto.Mention> = emptyList(), viewOnce: Boolean = false) {
         val repo = core.repo
         val conv = repo.conversation(convId) ?: return
         val self = core.account.aci ?: return
         val ts = timestamp
         val infos = files.map { io.github.kotbctakahe.hys1link.store.AttachmentInfo(it.contentType, it.fileName, it.bytes.size, null, it.width, it.height, null) }
+        val timer = conv.expireTimer
         val msgId = repo.insertMessage(convId, self, true, body, ts, MsgStatus.PENDING, infos,
-            quoteTs = quote?.id, quoteAuthor = quote?.authorUuid, quoteText = quote?.text)
+            quoteTs = quote?.id, quoteAuthor = quote?.authorUuid, quoteText = quote?.text,
+            expiresIn = timer, expireStarted = if (timer > 0) ts else 0, viewOnce = viewOnce,
+            mentions = mentions.map { io.github.kotbctakahe.hys1link.store.MentionInfo(it.start, it.length, it.uuid) })
         // keep a local copy so the sender sees the photo immediately
         files.forEachIndexed { i, f ->
             val ext = when { f.contentType == "image/png" -> "png"; f.contentType.startsWith("image/") -> "jpg"; else -> f.fileName?.substringAfterLast('.', "bin") ?: "bin" }
@@ -115,7 +121,8 @@ class Sender(private val core: Core) {
         try {
             val pointers = files.map { upload(it) }
             fun dm() = Content.dataMessage(body, ts, core.account.profileKey,
-                conv.groupMasterKey, if (conv.kind == ConvKind.GROUP) core.groups.cached(conv.id)?.revision ?: 0 else null, quote, pointers)
+                conv.groupMasterKey, if (conv.kind == ConvKind.GROUP) core.groups.cached(conv.id)?.revision ?: 0 else null, quote, pointers,
+                expireTimer = timer, mentions = mentions, viewOnce = viewOnce)
             when (conv.kind) {
                 ConvKind.GROUP -> {
                     val state = core.groups.cached(conv.id) ?: core.groups.refresh(conv)
@@ -142,15 +149,61 @@ class Sender(private val core: Core) {
         }
     }
 
+    /** Sends a DataMessage built by [dm] to everyone in the conversation and as a sync transcript. */
+    private fun broadcast(convId: String, ts: Long, dm: () -> io.github.kotbctakahe.hys1link.proto.ProtoWriter) {
+        val conv = core.repo.conversation(convId) ?: return
+        val self = core.account.aci ?: return
+        if (conv.kind == ConvKind.GROUP) {
+            val state = core.groups.cached(conv.id) ?: core.groups.refresh(conv)
+            state.members.filter { it.uuid != self }.forEach { m -> runCatching { sendContent(m.uuid, Content.withData(dm()), ts) } }
+            runCatching { sendContent(self, Content.syncSent(null, ts, dm()), ts, urgent = false) }
+        } else {
+            val peer = conv.peer!!
+            if (peer != self) sendContent(peer, Content.withData(dm()), ts)
+            runCatching { sendContent(self, Content.syncSent(peer, ts, dm()), ts, urgent = false) }
+        }
+    }
+
+    private fun groupCtx(conv: io.github.kotbctakahe.hys1link.store.Conversation) =
+        conv.groupMasterKey to (if (conv.kind == ConvKind.GROUP) core.groups.cached(conv.id)?.revision ?: 0 else null)
+
+    /** "Delete for everyone" (DataMessage.delete.targetSentTimestamp). Only own messages. */
+    fun deleteForEveryone(convId: String, target: io.github.kotbctakahe.hys1link.store.Message) {
+        val conv = core.repo.conversation(convId) ?: return
+        val ts = System.currentTimeMillis()
+        val (mk, rev) = groupCtx(conv)
+        broadcast(convId, ts) { Content.dataMessage(null, ts, core.account.profileKey, mk, rev, deleteTarget = target.sentTs, expireTimer = conv.expireTimer) }
+        core.repo.remoteDelete(core.account.aci!!, target.sentTs)
+    }
+
+    /** Changes the disappearing-messages timer (flags = EXPIRATION_TIMER_UPDATE). */
+    fun setExpireTimer(convId: String, seconds: Int) {
+        val conv = core.repo.conversation(convId) ?: return
+        val ts = System.currentTimeMillis()
+        val (mk, rev) = groupCtx(conv)
+        broadcast(convId, ts) { Content.dataMessage(null, ts, core.account.profileKey, mk, rev, expireTimer = seconds, flags = 2) }
+        core.repo.setExpireTimer(convId, seconds)
+        core.repo.insertSystem(convId, if (seconds > 0) "Вы включили исчезающие сообщения" else "Вы отключили исчезающие сообщения", ts)
+    }
+
+    fun setBlocked(uuid: String, blocked: Boolean) {
+        core.repo.upsertContact(uuid, blocked = blocked)
+        val all = core.repo.blockedContacts()
+        val self = core.account.aci ?: return
+        runCatching { sendContent(self, Content.syncBlocked(all.map { it.uuid }, all.mapNotNull { it.e164 }), System.currentTimeMillis(), urgent = false) }
+    }
+
+    fun syncViewOnceOpened(sender: String, ts: Long) {
+        val self = core.account.aci ?: return
+        runCatching { sendContent(self, Content.syncViewOnceOpen(sender, ts), System.currentTimeMillis(), urgent = false) }
+    }
+
     fun sendReaction(convId: String, targetAuthor: String, targetTs: Long, emoji: String, remove: Boolean) {
         val conv = core.repo.conversation(convId) ?: return
         val self = core.account.aci ?: return
-        if (conv.kind == ConvKind.GROUP) return
         val ts = System.currentTimeMillis()
-        val dm = Content.reaction(emoji, remove, targetAuthor, targetTs, ts, core.account.profileKey)
-        val peer = conv.peer!!
-        if (peer != self) sendContent(peer, Content.withData(dm), ts)
-        runCatching { sendContent(self, Content.syncSent(peer, ts, Content.reaction(emoji, remove, targetAuthor, targetTs, ts, core.account.profileKey)), ts, urgent = false) }
+        val (mk, rev) = groupCtx(conv)
+        broadcast(convId, ts) { Content.reaction(emoji, remove, targetAuthor, targetTs, ts, core.account.profileKey, mk, rev) }
         core.repo.setReaction(targetAuthor, targetTs, self, if (remove) null else emoji)
     }
 

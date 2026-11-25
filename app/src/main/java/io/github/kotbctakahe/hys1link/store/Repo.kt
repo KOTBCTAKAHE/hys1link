@@ -17,7 +17,13 @@ object ConvKind { const val DIRECT = 0; const val GROUP = 1; const val NOTE_TO_S
 data class Conversation(
     val id: String, val kind: Int, val peer: String?, val groupMasterKey: ByteArray?, val title: String,
     val lastBody: String?, val lastTs: Long, val unread: Int, val pinned: Boolean, val avatarPath: String?,
+    val expireTimer: Int = 0,
 )
+
+data class MentionInfo(val start: Int, val length: Int, val uuid: String)
+data class PreviewInfo(val url: String, val title: String?, val description: String?, val imagePath: String?)
+
+object MsgKind { const val NORMAL = 0; const val SYSTEM = 1 }
 
 object MsgStatus { const val PENDING = 0; const val SENT = 1; const val DELIVERED = 2; const val READ = 3; const val FAILED = -1; const val RECEIVED = 10 }
 
@@ -28,6 +34,8 @@ data class Message(
     val id: Long, val conv: String, val author: String?, val outgoing: Boolean, val body: String?,
     val sentTs: Long, val receivedTs: Long, val status: Int, val attachments: List<AttachmentInfo>,
     val quoteTs: Long?, val quoteAuthor: String?, val quoteText: String?, val reactions: Map<String, String>, val deleted: Boolean,
+    val expiresIn: Int = 0, val expireStarted: Long = 0, val viewOnce: Int = 0, val mentions: List<MentionInfo> = emptyList(),
+    val preview: PreviewInfo? = null, val kind: Int = MsgKind.NORMAL,
 )
 
 class Repo(val db: Db) {
@@ -45,6 +53,10 @@ class Repo(val db: Db) {
     fun contacts(): List<Contact> = r.rawQuery("SELECT uuid FROM contacts WHERE blocked=0", null).use { c ->
         buildList { while (c.moveToNext()) contact(c.getString(0))?.let { add(it) } }
     }.sortedBy { it.displayName.lowercase() }
+
+    fun blockedContacts(): List<Contact> = r.rawQuery("SELECT uuid FROM contacts WHERE blocked=1", null).use { c ->
+        buildList { while (c.moveToNext()) contact(c.getString(0))?.let { add(it) } }
+    }
 
     fun upsertContact(uuid: String, e164: String? = null, systemName: String? = null, profileName: String? = null,
                       about: String? = null, profileKey: ByteArray? = null, avatarPath: String? = null, blocked: Boolean? = null) {
@@ -124,6 +136,7 @@ class Repo(val db: Db) {
     private fun android.database.Cursor.toConversation() = Conversation(
         str("id")!!, lng("kind").toInt(), str("peer"), blob("group_master_key"), str("title") ?: "",
         str("last_body"), lng("last_ts"), lng("unread").toInt(), lng("pinned") != 0L, str("avatar"),
+        lng("expire_timer").toInt(),
     )
 
     fun markRead(convId: String) {
@@ -137,8 +150,13 @@ class Repo(val db: Db) {
     /** Returns new row id, or -1 if this message already exists (dedupe on conv+author+timestamp). */
     fun insertMessage(conv: String, author: String?, outgoing: Boolean, body: String?, sentTs: Long, status: Int,
                       attachments: List<AttachmentInfo> = emptyList(), quoteTs: Long? = null, quoteAuthor: String? = null,
-                      quoteText: String? = null, countUnread: Boolean = !outgoing): Long {
+                      quoteText: String? = null, countUnread: Boolean = !outgoing, expiresIn: Int = 0, expireStarted: Long = 0,
+                      viewOnce: Boolean = false, mentions: List<MentionInfo> = emptyList(), preview: PreviewInfo? = null,
+                      kind: Int = MsgKind.NORMAL): Long {
         val cv = ContentValues().apply {
+            put("expires_in", expiresIn); put("expire_started", expireStarted); put("view_once", if (viewOnce) 1 else 0); put("kind", kind)
+            if (mentions.isNotEmpty()) put("mentions", JSONArray().apply { mentions.forEach { put(JSONObject().put("s", it.start).put("l", it.length).put("u", it.uuid)) } }.toString())
+            if (preview != null) put("preview", JSONObject().put("url", preview.url).put("t", preview.title).put("d", preview.description).put("i", preview.imagePath).toString())
             put("conv", conv); put("author", author); put("outgoing", if (outgoing) 1 else 0); put("body", body)
             put("sent_ts", sentTs); put("received_ts", System.currentTimeMillis()); put("status", status)
             put("attachments", attachmentsToJson(attachments))
@@ -147,6 +165,7 @@ class Repo(val db: Db) {
         val id = w.insertWithOnConflict("messages", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
         if (id == -1L) return -1
         val preview = when {
+            viewOnce -> "🔥 Одноразовое сообщение"
             body != null && body.startsWith("/link=") -> "🧩 Стикер"
             !body.isNullOrBlank() -> body
             else -> attachments.firstOrNull()?.let { previewFor(it) } ?: ""
@@ -178,6 +197,8 @@ class Repo(val db: Db) {
                     c.lng("sent_ts"), c.lng("received_ts"), c.lng("status").toInt(), attachmentsFromJson(c.str("attachments")),
                     c.getColumnIndex("quote_ts").let { i -> if (c.isNull(i)) null else c.getLong(i) }, c.str("quote_author"), c.str("quote_text"),
                     reactionsFromJson(c.str("reactions")), c.lng("deleted") != 0L,
+                    c.lng("expires_in").toInt(), c.lng("expire_started"), c.lng("view_once").toInt(),
+                    mentionsFromJson(c.str("mentions")), previewFromJson(c.str("preview")), c.lng("kind").toInt(),
                 )
             )
         }
@@ -201,6 +222,7 @@ class Repo(val db: Db) {
                     "UPDATE conversations SET unread=(SELECT COUNT(*) FROM messages WHERE conv=? AND outgoing=0 AND status=10) WHERE id=?",
                     arrayOf(conv, conv)
                 )
+                startExpiration(conv)
             }
         }
         db.notifyChanged()
@@ -208,6 +230,7 @@ class Repo(val db: Db) {
 
     fun markConversationIncomingRead(conv: String) {
         w.execSQL("UPDATE messages SET status=11 WHERE conv=? AND outgoing=0 AND status=10", arrayOf(conv))
+        startExpiration(conv)
         markRead(conv)
     }
 
@@ -256,6 +279,67 @@ class Repo(val db: Db) {
                 o.optIntOrNull("w"), o.optIntOrNull("h"), o.optStringOrNull("ptr"))
         }
     }
+
+    private fun mentionsFromJson(s: String?): List<MentionInfo> = if (s.isNullOrBlank()) emptyList() else runCatching {
+        val a = JSONArray(s); (0 until a.length()).map { a.getJSONObject(it).let { o -> MentionInfo(o.getInt("s"), o.getInt("l"), o.getString("u")) } }
+    }.getOrDefault(emptyList())
+
+    private fun previewFromJson(s: String?): PreviewInfo? = if (s.isNullOrBlank()) null else runCatching {
+        JSONObject(s).let { o -> PreviewInfo(o.getString("url"), o.optStringOrNull("t"), o.optStringOrNull("d"), o.optStringOrNull("i")) }
+    }.getOrNull()
+
+    fun setPreviewImage(messageId: Long, path: String) {
+        val cur = r.rawQuery("SELECT preview FROM messages WHERE id=?", arrayOf(messageId.toString())).use { if (it.moveToFirst()) it.str("preview") else null } ?: return
+        val o = JSONObject(cur).put("i", path)
+        w.execSQL("UPDATE messages SET preview=? WHERE id=?", arrayOf(o.toString(), messageId)); db.notifyChanged()
+    }
+
+    // ---- disappearing messages ----
+    fun setExpireTimer(convId: String, seconds: Int) {
+        w.execSQL("UPDATE conversations SET expire_timer=? WHERE id=?", arrayOf(seconds, convId)); db.notifyChanged()
+    }
+
+    /** Starts the countdown for messages in [convId] that were read (incoming) / sent (outgoing). */
+    fun startExpiration(convId: String, now: Long = System.currentTimeMillis()) {
+        w.execSQL("UPDATE messages SET expire_started=? WHERE conv=? AND expires_in>0 AND expire_started=0 AND (outgoing=1 OR status=11)", arrayOf(now, convId))
+    }
+
+    /** Deletes messages whose timer ran out; returns how many were removed. */
+    fun deleteExpired(now: Long = System.currentTimeMillis()): Int {
+        val ids = r.rawQuery("SELECT id, attachments FROM messages WHERE expires_in>0 AND expire_started>0 AND expire_started + expires_in*1000 <= ?",
+            arrayOf(now.toString())).use { c -> buildList { while (c.moveToNext()) add(c.getLong(0) to c.str("attachments")) } }
+        if (ids.isEmpty()) return 0
+        ids.forEach { (id, att) ->
+            attachmentsFromJson(att).forEach { a -> a.localPath?.let { java.io.File(it).delete() } }
+            w.delete("messages", "id=?", arrayOf(id.toString()))
+        }
+        db.notifyChanged()
+        return ids.size
+    }
+
+    fun nextExpiry(): Long? = r.rawQuery("SELECT MIN(expire_started + expires_in*1000) FROM messages WHERE expires_in>0 AND expire_started>0", null)
+        .use { if (it.moveToFirst() && !it.isNull(0)) it.getLong(0) else null }
+
+    // ---- misc ----
+    fun insertSystem(conv: String, text: String, ts: Long = System.currentTimeMillis()) =
+        insertMessage(conv, "system", false, text, ts, 11, countUnread = false, kind = MsgKind.SYSTEM)
+
+    fun deleteLocal(messageId: Long) {
+        r.rawQuery("SELECT attachments FROM messages WHERE id=?", arrayOf(messageId.toString())).use { c ->
+            if (c.moveToFirst()) attachmentsFromJson(c.str("attachments")).forEach { a -> a.localPath?.let { java.io.File(it).delete() } }
+        }
+        w.delete("messages", "id=?", arrayOf(messageId.toString())); db.notifyChanged()
+    }
+
+    /** View-once: after opening, drop the media and remember it was viewed. */
+    fun markViewOnceViewed(author: String?, sentTs: Long) {
+        val m = findMessage(author, sentTs) ?: return
+        m.attachments.forEach { a -> a.localPath?.let { java.io.File(it).delete() } }
+        w.execSQL("UPDATE messages SET view_once=2, attachments=NULL WHERE id=?", arrayOf(m.id)); db.notifyChanged()
+    }
+
+    fun message(id: Long): Message? = r.rawQuery("SELECT conv FROM messages WHERE id=?", arrayOf(id.toString()))
+        .use { if (it.moveToFirst()) messages(it.getString(0), 2000).firstOrNull { m -> m.id == id } else null }
 
     private fun reactionsFromJson(s: String?): Map<String, String> {
         if (s.isNullOrBlank()) return emptyMap()

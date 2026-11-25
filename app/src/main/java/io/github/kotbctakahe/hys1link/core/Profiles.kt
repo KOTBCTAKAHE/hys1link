@@ -66,6 +66,14 @@ class Attachments(private val core: Core) {
         }
     }
 
+    fun downloadPreview(messageId: Long, img: io.github.kotbctakahe.hys1link.proto.AttachmentPointer) {
+        val idOrKey = img.cdnKey ?: img.cdnId?.toString() ?: return
+        val plain = AttachmentCipher.decrypt(core.api.downloadCdn(img.cdnNumber, idOrKey, 5L shl 20), img.key ?: return, img.digest)
+        val f = File(core.context.filesDir, "attachments/${messageId}_preview.jpg").apply { parentFile?.mkdirs() }
+        f.writeBytes(if (img.size != null && img.size in 1 until plain.size) plain.copyOf(img.size) else plain)
+        core.repo.setPreviewImage(messageId, f.absolutePath)
+    }
+
     fun download(messageId: Long, index: Int, a: AttachmentInfo): String {
         val ptr = JSONObject(a.pointer ?: error("no pointer"))
         val idOrKey = ptr.optString("key").takeIf { it.isNotBlank() && it != "null" } ?: ptr.getString("id")

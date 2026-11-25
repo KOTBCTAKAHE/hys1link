@@ -104,7 +104,14 @@ class MainActivity : ComponentActivity() {
                             }
                             composable("chat/{id}") { e ->
                                 val id = URLDecoder.decode(e.arguments?.getString("id") ?: "", "UTF-8")
-                                ChatScreen(core, id) { nav.popBackStack() }
+                                ChatScreen(core, id, onBack = { nav.popBackStack() }, onOpenInfo = { cid -> nav.navigate("info/" + URLEncoder.encode(cid, "UTF-8")) })
+                            }
+                            composable("info/{id}") { e ->
+                                val id = URLDecoder.decode(e.arguments?.getString("id") ?: "", "UTF-8")
+                                io.github.kotbctakahe.hys1link.ui.screens.InfoScreen(core, id, onBack = { nav.popBackStack() },
+                                    onOpenUser = { k -> nav.navigate(userRoute(k)) },
+                                    onOpenChat = { cid -> nav.navigate("chat/" + URLEncoder.encode(cid, "UTF-8")) },
+                                    onDeleted = { nav.popBackStack("home", false) })
                             }
                             composable("new") {
                                 NewChatScreen(core, onBack = { nav.popBackStack() }) { id ->

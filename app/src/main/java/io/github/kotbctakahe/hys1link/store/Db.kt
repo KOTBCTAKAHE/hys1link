@@ -8,7 +8,7 @@ import android.database.sqlite.SQLiteOpenHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-class Db(context: Context) : SQLiteOpenHelper(context, "hys1link.db", null, 2) {
+class Db(context: Context) : SQLiteOpenHelper(context, "hys1link.db", null, 3) {
 
     /** Incremented on every write that the UI may care about. */
     private val _version = MutableStateFlow(0L)
@@ -32,13 +32,14 @@ class Db(context: Context) : SQLiteOpenHelper(context, "hys1link.db", null, 2) {
         db.execSQL(
             """CREATE TABLE conversations (
                 id TEXT PRIMARY KEY, kind INTEGER NOT NULL, peer TEXT, group_master_key BLOB, title TEXT,
-                last_body TEXT, last_ts INTEGER DEFAULT 0, unread INTEGER DEFAULT 0, archived INTEGER DEFAULT 0, pinned INTEGER DEFAULT 0, avatar_path TEXT)"""
+                last_body TEXT, last_ts INTEGER DEFAULT 0, unread INTEGER DEFAULT 0, archived INTEGER DEFAULT 0, pinned INTEGER DEFAULT 0, avatar_path TEXT, expire_timer INTEGER DEFAULT 0)"""
         )
         db.execSQL(
             """CREATE TABLE messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, conv TEXT NOT NULL, author TEXT, outgoing INTEGER NOT NULL,
                 body TEXT, sent_ts INTEGER NOT NULL, received_ts INTEGER NOT NULL, status INTEGER DEFAULT 0,
                 attachments TEXT, quote_ts INTEGER, quote_author TEXT, quote_text TEXT, reactions TEXT, deleted INTEGER DEFAULT 0,
+                expires_in INTEGER DEFAULT 0, expire_started INTEGER DEFAULT 0, view_once INTEGER DEFAULT 0, mentions TEXT, preview TEXT, kind INTEGER DEFAULT 0,
                 UNIQUE(conv, author, sent_ts))"""
         )
         db.execSQL("CREATE INDEX messages_conv ON messages(conv, sent_ts)")
@@ -47,6 +48,11 @@ class Db(context: Context) : SQLiteOpenHelper(context, "hys1link.db", null, 2) {
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) db.execSQL("ALTER TABLE conversations ADD COLUMN avatar_path TEXT")
+        if (oldVersion < 3) {
+            db.execSQL("ALTER TABLE conversations ADD COLUMN expire_timer INTEGER DEFAULT 0")
+            listOf("expires_in INTEGER DEFAULT 0", "expire_started INTEGER DEFAULT 0", "view_once INTEGER DEFAULT 0",
+                "mentions TEXT", "preview TEXT", "kind INTEGER DEFAULT 0").forEach { db.execSQL("ALTER TABLE messages ADD COLUMN $it") }
+        }
     }
 
     // ---- key/value ----

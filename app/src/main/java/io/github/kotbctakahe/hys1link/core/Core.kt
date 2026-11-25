@@ -57,7 +57,18 @@ class Core private constructor(val context: Context) {
 
     private var loop: Job? = null
 
-    init { if (account.isLinked) openStore() }
+    init {
+        if (account.isLinked) openStore()
+        // disappearing messages sweeper
+        scope.launchIo {
+            while (isActive) {
+                runCatching { repo.deleteExpired() }
+                val next = runCatching { repo.nextExpiry() }.getOrNull()
+                val wait = next?.let { (it - System.currentTimeMillis()).coerceIn(1_000, 30_000) } ?: 30_000
+                delay(wait)
+            }
+        }
+    }
 
     private fun openStore() {
         store = ProtocolStore(db, account.identityKeyPair!!, account.registrationId)
