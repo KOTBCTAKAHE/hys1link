@@ -57,10 +57,13 @@ class Core private constructor(val context: Context) {
         store = ProtocolStore(db, account.identityKeyPair!!, account.registrationId)
     }
 
+    /** Called by Linker once the server accepted this device. Blocking; runs on IO. */
     fun onLinked() {
         openStore()
-        _linked.value = true
+        runCatching { keys.refreshPreKeys(force = true) }.onFailure { Log.w(TAG, "initial prekeys failed, will retry on connect", it) }
+        runCatching { sender.requestInitialSync() }.onFailure { Log.w(TAG, "initial sync request failed", it) }
         repo.ensureDirect(account.aci!!, account.aci)
+        _linked.value = true
         scope.launchIo { runCatching { profiles.refreshSelf() } }
     }
 
@@ -87,10 +90,12 @@ class Core private constructor(val context: Context) {
                 socket.connect()
                 val pump = launchIo { socket.pump() }
                 // keep-alive / health check
+                var sinceKeepAlive = 0
                 while (isActive) {
-                    delay(30_000)
-                    if (_conn.value == Conn.AUTH_FAILED) break
-                    if (_conn.value != Conn.ONLINE && _conn.value != Conn.CONNECTING) break
+                    delay(1_000)
+                    if (_conn.value == Conn.AUTH_FAILED || _conn.value == Conn.OFFLINE) break
+                    if (++sinceKeepAlive < 30) continue
+                    sinceKeepAlive = 0
                     if (!socket.keepAlive()) { Log.w(TAG, "keepalive failed"); break }
                     backoff = 2_000L
                 }

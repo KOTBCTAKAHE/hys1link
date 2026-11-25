@@ -22,7 +22,8 @@ import java.util.concurrent.atomic.AtomicLong
  * Unauthenticated provisioning socket used when linking this app as a secondary device.
  * Server sends: PUT /v1/address  (ProvisioningUuid) then PUT /v1/message (ProvisionEnvelope).
  */
-class ProvisioningSocket(private val http: OkHttpClient) {
+class ProvisioningSocket(baseHttp: OkHttpClient) {
+    private val http = baseHttp.newBuilder().pingInterval(20, java.util.concurrent.TimeUnit.SECONDS).build()
     sealed class Event {
         data class Address(val uuid: String) : Event()
         data class Envelope(val publicKey: ByteArray, val body: ByteArray) : Event()
@@ -68,12 +69,14 @@ class ProvisioningSocket(private val http: OkHttpClient) {
  * Incoming envelopes arrive as PUT /api/v1/message requests; we ack each after it is processed.
  */
 class ChatSocket(
-    private val http: OkHttpClient,
+    baseHttp: OkHttpClient,
     private val creds: Creds,
     private val onRequest: suspend (WsRequest) -> Int,
     private val onState: (State) -> Unit,
 ) {
     enum class State { CONNECTING, CONNECTED, DISCONNECTED, AUTH_FAILED }
+
+    private val http = baseHttp.newBuilder().pingInterval(25, java.util.concurrent.TimeUnit.SECONDS).build()
 
     private var ws: WebSocket? = null
     private val ids = AtomicLong(System.currentTimeMillis())

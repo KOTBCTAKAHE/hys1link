@@ -37,9 +37,21 @@ class Linker(private val core: Core) {
         data class Failed(val message: String) : State()
     }
 
-    suspend fun run(deviceName: String, onState: (State) -> Unit) = withContext(Dispatchers.IO) {
+    suspend fun run(deviceName: String, onState: (State) -> Unit): Unit = withContext(Dispatchers.IO) {
+        var renewals = 0
+        while (true) {
+            when (val r = attempt(deviceName, onState)) {
+                null -> return@withContext
+                else -> if (r && renewals++ < 20) continue else return@withContext
+            }
+        }
+    }
+
+    /** null = finished (done or failed); true = socket closed while waiting for scan, retry with a fresh QR. */
+    private suspend fun attempt(deviceName: String, onState: (State) -> Unit): Boolean? {
         val cipher = ProvisioningCipher()
         val socket = ProvisioningSocket(core.http)
+        var shownQr = false
         try {
             onState(State.Connecting)
             socket.open()
@@ -48,6 +60,7 @@ class Linker(private val core: Core) {
                     is ProvisioningSocket.Event.Address -> {
                         val pub = B64.enc(cipher.keyPair.publicKey.serialize())
                         val url = "sgnl://linkdevice?uuid=${URLEncoder.encode(ev.uuid, "UTF-8")}&pub_key=${URLEncoder.encode(pub, "UTF-8")}"
+                        shownQr = true
                         onState(State.ShowQr(url))
                     }
                     is ProvisioningSocket.Event.Envelope -> {
@@ -55,20 +68,25 @@ class Linker(private val core: Core) {
                         val plain = cipher.decrypt(ev.publicKey, ev.body)
                         finish(ProtoMessage.parse(plain), deviceName)
                         onState(State.Done)
-                        return@withContext
+                        return null
                     }
                     is ProvisioningSocket.Event.Closed -> {
-                        onState(State.Failed("Соединение с сервером закрыто: ${ev.reason}"))
-                        return@withContext
+                        if (shownQr) return true
+                        onState(State.Failed("Не удалось подключиться к серверу Link: ${ev.reason}"))
+                        return null
                     }
                 }
             }
         } catch (e: ApiException) {
             Log.w(TAG, "link failed", e)
             onState(State.Failed(describe(e)))
+            return null
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "link failed", e)
             onState(State.Failed(e.message ?: e.javaClass.simpleName))
+            return null
         } finally {
             socket.close()
         }
@@ -145,8 +163,6 @@ class Linker(private val core: Core) {
         acct.sendReadReceipts = pm.bool(7) ?: true
 
         core.onLinked()
-        core.keys.refreshPreKeys(force = true)
-        core.sender.requestInitialSync()
     }
 
     companion object { private const val TAG = "Linker" }
