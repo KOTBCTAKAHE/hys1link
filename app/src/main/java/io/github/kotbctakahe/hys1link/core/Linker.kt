@@ -94,7 +94,7 @@ class Linker(private val core: Core) {
 
     private fun describe(e: ApiException) = when (e.code) {
         403 -> "Код привязки устарел. Попробуйте ещё раз."
-        409 -> "Сервер отклонил устройство (несовместимые возможности): ${e.body}"
+        409 -> "Сервер отклонил устройство (409): ${e.body?.take(300).orEmpty()}"
         411 -> "Достигнут лимит связанных устройств. Удалите одно в Link → Связанные устройства."
         429 -> "Слишком много попыток. Подождите немного."
         else -> "Ошибка сервера ${e.code}: ${e.body?.take(200)}"
@@ -118,7 +118,24 @@ class Linker(private val core: Core) {
         val registrationId = KeyHelper.generateRegistrationId(false)
         val pniRegistrationId = KeyHelper.generateRegistrationId(false)
 
-        val attrs = JSONObject()
+        // Capabilities Link 7.4.4 itself reports (AppCapabilities).
+        val caps = linkedMapOf<String, Any>(
+            "uuid" to false, "gv2-3" to true, "storage" to false, "gv1-migration" to true, "senderKey" to true,
+            "announcementGroup" to true, "changeNumber" to true, "stories" to true, "giftBadges" to true,
+            "vds" to true, "serverMessagesVersion" to 1,
+        )
+        // The server may be newer than the Link client and require more. The account's own profile
+        // lists what the server tracks; mirror every boolean capability it reports.
+        val discovered = mutableListOf<String>()
+        if (profileKey != null) runCatching {
+            val p = core.api.profileUnidentified(aci, ProfileCipher.unidentifiedAccessKey(profileKey))
+            p.optJSONObject("capabilities")?.let { c ->
+                c.keys().forEach { k -> if (c.opt(k) is Boolean) { caps[k] = true; discovered += k } }
+            }
+        }.onFailure { Log.w(TAG, "capability discovery failed", it) }
+        Log.i(TAG, "discovered capabilities: $discovered")
+
+        fun attrs() = JSONObject()
             .put("signalingKey", JSONObject.NULL)
             .put("registrationId", registrationId)
             .put("pniRegistrationId", pniRegistrationId)
@@ -131,22 +148,31 @@ class Linker(private val core: Core) {
             .put("unrestrictedUnidentifiedAccess", false)
             .put("discoverableByPhoneNumber", true)
             .put("name", DeviceNameCipher.encrypt(deviceName.ifBlank { LinkConfig.DEVICE_NAME }, aciPub))
-            .put("capabilities", JSONObject()
-                // Same set Link 7.4.4 reports (AppCapabilities), so the server does not reject a "downgrade".
-                .put("uuid", false)
-                .put("gv2-3", true)
-                .put("storage", false)
-                .put("gv1-migration", true)
-                .put("senderKey", true)
-                .put("announcementGroup", true)
-                .put("changeNumber", true)
-                .put("stories", true)
-                .put("giftBadges", true)
-                .put("vds", true)
-                .put("serverMessagesVersion", 1))
+            .put("capabilities", JSONObject(caps as Map<*, *>))
             .put("userDeviceInfo", JSONObject.NULL)
 
-        val resp = core.api.finishDeviceLink(number, password, code, attrs)
+        val resp = try {
+            core.api.finishDeviceLink(number, password, code, attrs())
+        } catch (e: ApiException) {
+            if (e.code != 409) throw e
+            Log.w(TAG, "409 with ${caps.keys}, retrying with extended capability set: ${e.body}")
+            // Capabilities introduced by later Signal-Server versions.
+            listOf("pni", "paymentActivation", "deleteSync", "versionedExpirationTimer",
+                "storageServiceRecordKeyRotation", "attachmentBackfill", "spqr", "transfer", "ssre2")
+                .forEach { caps[it] = true }
+            caps["uuid"] = true; caps["storage"] = true
+            try {
+                core.api.finishDeviceLink(number, password, code, attrs())
+            } catch (e2: ApiException) {
+                if (e2.code != 409) throw e2
+                throw IllegalStateException(
+                    "Сервер отклонил устройство (409): у аккаунта есть возможность, которую клиент не заявил.\n" +
+                    "Отправлено: ${caps.filterValues { it == true }.keys.joinToString()}\n" +
+                    "Найдено в профиле: ${discovered.joinToString().ifEmpty { "ничего" }}\n" +
+                    "Ответ сервера: ${e2.body?.take(300).orEmpty().ifEmpty { "(пусто)" }}"
+                )
+            }
+        }
         val deviceId = resp.optInt("deviceId", 0)
         require(deviceId > 1) { "Сервер не вернул номер устройства: $resp" }
 

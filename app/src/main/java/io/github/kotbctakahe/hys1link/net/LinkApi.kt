@@ -26,9 +26,10 @@ class LinkApi(private val http: OkHttpClient, private val creds: () -> Creds?) {
     private val json = "application/json".toMediaType()
 
     private fun call(method: String, path: String, body: JSONObject? = null, auth: Creds? = creds(),
-                     base: String = LinkConfig.SERVICE_URL): String {
+                     base: String = LinkConfig.SERVICE_URL, headers: Map<String, String> = emptyMap()): String {
         val b = Request.Builder().url(base + path)
         if (auth != null) b.header("Authorization", Credentials.basic(auth.username, auth.password))
+        headers.forEach { (k, v) -> b.header(k, v) }
         val rb = body?.toString()?.toRequestBody(json)
         when (method) {
             "GET" -> b.get()
@@ -130,6 +131,10 @@ class LinkApi(private val http: OkHttpClient, private val creds: () -> Creds?) {
     // ---- profiles ----
     fun versionedProfile(uuid: String, version: String): JSONObject = JSONObject(call("GET", "/v1/profile/$uuid/$version"))
     fun profile(uuid: String): JSONObject = JSONObject(call("GET", "/v1/profile/$uuid"))
+
+    /** Unauthenticated profile fetch using the unidentified-access key (works before linking). */
+    fun profileUnidentified(uuid: String, accessKey: ByteArray): JSONObject =
+        JSONObject(call("GET", "/v1/profile/$uuid", auth = null, headers = mapOf("Unidentified-Access-Key" to B64.enc(accessKey))))
 
     fun whoAmI(): JSONObject = JSONObject(call("GET", "/v1/accounts/whoami"))
 

@@ -118,7 +118,9 @@ fun LinkScreen(core: Core) {
                 }
                 is Linker.State.Failed -> Column {
                     Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.08f)).padding(18.dp)) {
-                        Text(s.message, color = Color(0xFFFFD7D1), style = MaterialTheme.typography.bodyMedium)
+                        androidx.compose.foundation.text.selection.SelectionContainer {
+                            Text(s.message, color = Color(0xFFFFD7D1), style = MaterialTheme.typography.bodyMedium)
+                        }
                     }
                     Spacer(Modifier.height(20.dp))
                     PrimaryButton("Попробовать снова", mint, slab) { attempt++ }
