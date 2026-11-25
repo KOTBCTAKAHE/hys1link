@@ -84,6 +84,24 @@ object DeviceNameCipher {
 
 /** Signal attachment encryption: key = aes(32)||mac(32), blob = iv||AES-CBC||HMAC. */
 object AttachmentCipher {
+    class Encrypted(val blob: ByteArray, val key: ByteArray, val digest: ByteArray, val plaintextLength: Int)
+
+    /** Signal's PaddingInputStream.getPaddedSize: max(541, 1.05^ceil(log_1.05(size))). */
+    fun paddedSize(size: Long): Long = maxOf(541.0, Math.floor(Math.pow(1.05, Math.ceil(Math.log(size.toDouble()) / Math.log(1.05))))).toLong()
+
+    fun encrypt(plain: ByteArray): Encrypted {
+        val key = randomBytes(64)
+        val iv = randomBytes(16)
+        val padded = plain.copyOf(paddedSize(plain.size.toLong()).toInt().coerceAtLeast(plain.size))
+        val c = Cipher.getInstance("AES/CBC/PKCS5Padding")
+        c.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key.copyOfRange(0, 32), "AES"), IvParameterSpec(iv))
+        val ct = c.doFinal(padded)
+        val body = iv + ct
+        val mac = hmacSha256(key.copyOfRange(32, 64), body)
+        val blob = body + mac
+        return Encrypted(blob, key, MessageDigest.getInstance("SHA-256").digest(blob), plain.size)
+    }
+
     fun decrypt(blob: ByteArray, key: ByteArray, digest: ByteArray?): ByteArray {
         require(key.size == 64) { "Bad attachment key" }
         require(blob.size > 48) { "Attachment too short" }

@@ -558,7 +558,11 @@ fun PostScreen(core: Core, postId: String, onBack: () -> Unit, onOpenUser: (Prof
     var error by remember { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
-    suspend fun reloadComments() { runCatching { withContext(Dispatchers.IO) { core.social.comments(postId).first } }.onSuccess { comments = it } }
+    var commentsError by remember { mutableStateOf<String?>(null) }
+    suspend fun reloadComments() {
+        runCatching { withContext(Dispatchers.IO) { core.social.comments(postId).first } }
+            .onSuccess { comments = it; commentsError = null }.onFailure { commentsError = errorText(it) }
+    }
     LaunchedEffect(postId) {
         runCatching { withContext(Dispatchers.IO) { core.social.post(postId) } }.onSuccess { post = it }.onFailure { error = errorText(it) }
         reloadComments()
@@ -574,7 +578,9 @@ fun PostScreen(core: Core, postId: String, onBack: () -> Unit, onOpenUser: (Prof
                     IconButton(enabled = draft.isNotBlank(), onClick = {
                         val t = draft.trim(); draft = ""
                         scope.launch {
-                            runCatching { withContext(Dispatchers.IO) { core.social.addComment(postId, t) } }.onSuccess { reloadComments() }
+                            runCatching { withContext(Dispatchers.IO) { core.social.addComment(postId, t) } }
+                                .onSuccess { post = post?.let { p -> p.copy(comments = p.comments + 1) }; reloadComments() }
+                                .onFailure { commentsError = "Комментарий не отправлен: " + errorText(it) }
                         }
                     }) { Icon(Icons.AutoMirrored.Rounded.Send, "Отправить комментарий", tint = MaterialTheme.colorScheme.primary) }
                 }
@@ -589,7 +595,8 @@ fun PostScreen(core: Core, postId: String, onBack: () -> Unit, onOpenUser: (Prof
                     else -> Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 }
             }
-            if (post != null && comments.isEmpty()) item {
+            commentsError?.let { e -> item { CenterMessage("Комментарии не загрузились", e) { scope.launch { reloadComments() } } } }
+            if (post != null && comments.isEmpty() && commentsError == null) item {
                 Text("Комментариев пока нет", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(16.dp))
             }

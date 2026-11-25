@@ -82,25 +82,57 @@ class Sender(private val core: Core) {
 
     // ---------------- high level ----------------
 
-    /** Sends a text message to a conversation and records it locally. */
-    fun sendText(convId: String, body: String, quote: Quote? = null) {
+    /** A file the user picked, already read into memory. */
+    class LocalFile(val bytes: ByteArray, val contentType: String, val fileName: String?, val width: Int? = null, val height: Int? = null)
+
+    /** Encrypts and uploads via Link's v4 form + TUS; returns the pointer to put in DataMessage.attachments. */
+    fun upload(f: LocalFile, caption: String? = null): io.github.kotbctakahe.hys1link.proto.OutAttachment {
+        val enc = io.github.kotbctakahe.hys1link.crypto.AttachmentCipher.encrypt(f.bytes)
+        val form = core.api.uploadForm(enc.blob.size.toLong())
+        core.api.tusUpload(form, enc.blob)
+        return io.github.kotbctakahe.hys1link.proto.OutAttachment(
+            form.cdn, form.key, f.contentType, enc.key, enc.plaintextLength, enc.digest, f.fileName, f.width, f.height, caption,
+        )
+    }
+
+    fun sendText(convId: String, body: String, quote: Quote? = null) = sendMessage(convId, body, emptyList(), quote)
+
+    /** Sends text and/or attachments to a conversation (direct, note-to-self or group) and records it locally. */
+    fun sendMessage(convId: String, body: String?, files: List<LocalFile>, quote: Quote? = null, timestamp: Long = System.currentTimeMillis()) {
         val repo = core.repo
         val conv = repo.conversation(convId) ?: return
         val self = core.account.aci ?: return
-        if (conv.kind == ConvKind.GROUP) { core.groups.sendText(conv, body); return }
-        val ts = System.currentTimeMillis()
-        val msgId = repo.insertMessage(convId, self, true, body, ts, MsgStatus.PENDING,
+        val ts = timestamp
+        val infos = files.map { io.github.kotbctakahe.hys1link.store.AttachmentInfo(it.contentType, it.fileName, it.bytes.size, null, it.width, it.height, null) }
+        val msgId = repo.insertMessage(convId, self, true, body, ts, MsgStatus.PENDING, infos,
             quoteTs = quote?.id, quoteAuthor = quote?.authorUuid, quoteText = quote?.text)
+        // keep a local copy so the sender sees the photo immediately
+        files.forEachIndexed { i, f ->
+            val ext = when { f.contentType == "image/png" -> "png"; f.contentType.startsWith("image/") -> "jpg"; else -> f.fileName?.substringAfterLast('.', "bin") ?: "bin" }
+            val file = java.io.File(core.context.filesDir, "attachments/${msgId}_$i.$ext").apply { parentFile?.mkdirs() }
+            runCatching { file.writeBytes(f.bytes); repo.updateAttachmentPath(msgId, i, file.absolutePath) }
+        }
         try {
+            val pointers = files.map { upload(it) }
+            fun dm() = Content.dataMessage(body, ts, core.account.profileKey,
+                conv.groupMasterKey, if (conv.kind == ConvKind.GROUP) core.groups.cached(conv.id)?.revision ?: 0 else null, quote, pointers)
             when (conv.kind) {
-                ConvKind.DIRECT, ConvKind.NOTE_TO_SELF -> {
+                ConvKind.GROUP -> {
+                    val state = core.groups.cached(conv.id) ?: core.groups.refresh(conv)
+                    var delivered = 0
+                    state.members.filter { it.uuid != self }.forEach { m ->
+                        runCatching { sendContent(m.uuid, Content.withData(dm()), ts); delivered++ }
+                            .onFailure { Log.w(TAG, "group send to ${m.uuid} failed", it) }
+                    }
+                    if (delivered == 0 && state.members.any { it.uuid != self }) error("Ни один участник группы не получил сообщение")
+                    runCatching { sendContent(self, Content.syncSent(null, ts, dm()), ts, urgent = false) }
+                }
+                else -> {
                     val peer = conv.peer!!
-                    val dm = Content.dataMessage(body, ts, core.account.profileKey, quote = quote)
-                    if (peer != self) sendContent(peer, Content.withData(dm), ts)
-                    runCatching { sendContent(self, Content.syncSent(peer, ts, Content.dataMessage(body, ts, core.account.profileKey, quote = quote)), ts, urgent = false) }
+                    if (peer != self) sendContent(peer, Content.withData(dm()), ts)
+                    runCatching { sendContent(self, Content.syncSent(peer, ts, dm()), ts, urgent = false) }
                         .onFailure { Log.w(TAG, "sync transcript failed", it) }
                 }
-                else -> Unit
             }
             repo.setStatus(msgId, MsgStatus.SENT)
         } catch (e: Exception) {

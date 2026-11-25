@@ -120,7 +120,7 @@ class SocialClient(private val core: Core) {
         SocialProto.postList(getProto("/api/v2/users/$userId/posts", "cursor" to cursor, "limit" to limit))
     fun myPosts(cursor: String?, limit: Int = 30): SPage = SocialProto.postList(getProto("/api/v2/me/posts", "cursor" to cursor, "limit" to limit))
 
-    fun like(postId: String, reaction: String = "like") {
+    fun like(postId: String, reaction: String = "") { // Link: DEFAULT_REACTION_KEY = ""
         exec({ it.url(url("/api/v2/reactions/posts/$postId")).post(SocialProto.likeRequest(reaction).toRequestBody(protoType)) }, true)
     }
     fun unlike(postId: String) { exec({ it.url(url("/api/v2/reactions/posts/$postId")).delete() }, true) }
@@ -149,16 +149,46 @@ class SocialClient(private val core: Core) {
         return list to d.optStr("cursor")
     }
 
+    // ---------- stickers (Link store) ----------
+    fun stickerPacks(): List<io.github.kotbctakahe.hys1link.core.StickerPack> {
+        fun parse(raw: Any): List<io.github.kotbctakahe.hys1link.core.StickerPack> {
+            val root = raw as? JSONObject
+            val d = root?.optJSONObject("data") ?: root
+            val arr = (raw as? JSONArray) ?: d?.optJSONArray("packs") ?: root?.optJSONArray("data") ?: JSONArray()
+            return (0 until arr.length()).mapNotNull { i ->
+                val p = arr.optJSONObject(i) ?: return@mapNotNull null
+                val name = p.optStr("name")
+                val st = p.optJSONArray("stickers") ?: JSONArray()
+                val items = (0 until st.length()).mapNotNull { j ->
+                    val it = st.optJSONObject(j) ?: return@mapNotNull null
+                    val url = it.optStr("url") ?: return@mapNotNull null
+                    io.github.kotbctakahe.hys1link.core.StickerItem(it.optInt("id"), url, it.optStr("emoji"), it.optStr("type"), it.optStr("packName") ?: name)
+                }
+                if (items.isEmpty()) null
+                else io.github.kotbctakahe.hys1link.core.StickerPack(p.optInt("id"), p.optStr("title") ?: name ?: "Стикеры",
+                    mediaUrl(p.optJSONObject("cover")?.optStr("url")) ?: mediaUrl(items.first().url), items)
+            }
+        }
+        val mine = runCatching { parse(getJson("/api/v1/stickers/my_packs", "limit" to 50)) }.getOrDefault(emptyList())
+        if (mine.isNotEmpty()) return mine
+        return parse(getJson("/api/v1/stickers/popular_packs", "limit" to 20))
+    }
+
     // ---------- comments ----------
     fun comments(postId: String, cursor: String? = null, limit: Int = 30): Pair<List<SComment>, String?> {
-        val d = getJson("/api/v1/comments/post_comments", "postId" to postId, "limit" to limit, "cursor" to cursor).data()
-        val arr = d.optJSONArray("comments") ?: JSONArray()
-        val list = (0 until arr.length()).map { i ->
-            val c = arr.getJSONObject(i)
-            SComment(c.optLong("id"), c.optString("comment"), c.optStr("created_at"),
-                c.optJSONObject("user")?.let(::parseProfile), c.optInt("replies_count"), c.optBoolean("is_self"))
+        val raw = getJson("/api/v1/comments/post_comments", "postId" to postId, "limit" to limit, "cursor" to cursor)
+        // Tolerate: {comments:[…]}, {data:{comments:[…]}}, {data:[…]}, or a bare array.
+        val root = raw as? JSONObject
+        val d = root?.optJSONObject("data") ?: root
+        val arr = (raw as? JSONArray) ?: root?.optJSONArray("data") ?: d?.optJSONArray("comments") ?: d?.optJSONArray("items") ?: JSONArray()
+        val list = (0 until arr.length()).mapNotNull { i ->
+            val c = arr.optJSONObject(i) ?: return@mapNotNull null
+            val text = c.optStr("comment") ?: c.optStr("content") ?: c.optStr("text") ?: ""
+            SComment(c.optLong("id"), text, c.optStr("created_at") ?: c.optStr("createdAt"),
+                (c.optJSONObject("user") ?: c.optJSONObject("author"))?.let(::parseProfile),
+                c.optInt("replies_count", c.optInt("repliesCount")), c.optBoolean("is_self"))
         }
-        return list to d.optStr("cursor")
+        return list to d?.optStr("cursor")
     }
 
     fun addComment(postId: String, text: String) {

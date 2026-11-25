@@ -3,6 +3,7 @@ package io.github.kotbctakahe.hys1link.net
 import io.github.kotbctakahe.hys1link.LinkConfig
 import io.github.kotbctakahe.hys1link.crypto.B64
 import okhttp3.Credentials
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -137,6 +138,50 @@ class LinkApi(private val http: OkHttpClient, private val creds: () -> Creds?) {
         JSONObject(call("GET", "/v1/profile/$uuid", auth = null, headers = mapOf("Unidentified-Access-Key" to B64.enc(accessKey))))
 
     fun whoAmI(): JSONObject = JSONObject(call("GET", "/v1/accounts/whoami"))
+
+    // ---- uploads (Link: v4 form + TUS on upload.linkm.me) ----
+    data class UploadForm(val cdn: Int, val key: String, val headers: Map<String, String>, val location: String)
+
+    fun uploadForm(length: Long): UploadForm {
+        val o = JSONObject(call("GET", "/v4/attachments/form/upload?uploadLength=$length"))
+        val h = o.optJSONObject("headers")
+        val headers = h?.keys()?.asSequence()?.associateWith { h.getString(it) } ?: emptyMap()
+        return UploadForm(o.getInt("cdn"), o.getString("key"), headers, o.getString("signedUploadLocation"))
+    }
+
+    /** TUS create (POST) + upload (PATCH), as PushServiceSocket.createTusUpload / uploadToCdn3. */
+    fun tusUpload(form: UploadForm, blob: ByteArray) {
+        val sha = B64.enc(java.security.MessageDigest.getInstance("SHA-256").digest(blob))
+        val meta = "filename " + B64.enc(form.key.toByteArray())
+        val create = Request.Builder().url(form.location)
+            .post(ByteArray(0).toRequestBody(null))
+            .header("Tus-Resumable", "1.0.0")
+            .header("Upload-Length", blob.size.toString())
+            .header("Upload-Metadata", meta)
+            .header("X-Signal-Checksum-Sha256", sha)
+            .apply { form.headers.forEach { (k, v) -> if (k.lowercase() !in tusReserved) header(k, v) } }
+            .build()
+        val location = http.newCall(create).execute().use { r ->
+            if (!r.isSuccessful) throw ApiException(r.code, "TUS create: " + r.body?.string())
+            r.header("Location") ?: throw ApiException(r.code, "TUS create: no Location")
+        }
+        val target = resolve(form.location, location)
+        val patch = Request.Builder().url(target)
+            .patch(blob.toRequestBody("application/offset+octet-stream".toMediaType()))
+            .header("Tus-Resumable", "1.0.0")
+            .header("Upload-Offset", "0")
+            .apply { form.headers.forEach { (k, v) -> if (k.lowercase() !in tusReserved) header(k, v) } }
+            .build()
+        http.newCall(patch).execute().use { r ->
+            if (!r.isSuccessful) throw ApiException(r.code, "TUS upload: " + r.body?.string())
+        }
+    }
+
+    private val tusReserved = setOf("content-length", "host", "tus-resumable", "upload-metadata", "upload-length", "upload-offset", "content-type")
+
+    private fun resolve(base: String, loc: String): String =
+        if (loc.startsWith("http://") || loc.startsWith("https://")) loc
+        else (base.toHttpUrlOrNull()?.resolve(loc)?.toString() ?: loc)
 
     // ---- cdn ----
     fun downloadCdn(cdnNumber: Int, idOrKey: String, maxBytes: Long = 100L * 1024 * 1024): ByteArray {

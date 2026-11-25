@@ -85,6 +85,18 @@ data class AttachmentPointer(
     }
 }
 
+/** Outgoing attachment pointer (fields per Link's SignalServiceProtos.AttachmentPointer). */
+data class OutAttachment(
+    val cdnNumber: Int, val cdnKey: String, val contentType: String, val key: ByteArray, val size: Int, val digest: ByteArray,
+    val fileName: String?, val width: Int?, val height: Int?, val caption: String? = null, val uploadTimestamp: Long = System.currentTimeMillis(),
+    val flags: Int? = null,
+) {
+    fun encode(): ProtoWriter = ProtoWriter()
+        .string(2, contentType).bytes(3, key).uint(4, size).bytes(6, digest).string(7, fileName)
+        .uint(8, flags).uint(9, width).uint(10, height).string(11, caption).uint(13, uploadTimestamp)
+        .uint(14, cdnNumber).string(15, cdnKey)
+}
+
 data class Quote(val id: Long, val authorUuid: String?, val text: String?)
 data class Reaction(val emoji: String, val remove: Boolean, val targetAuthorUuid: String?, val targetTimestamp: Long)
 
@@ -100,6 +112,8 @@ data class DataMessage(
     val reaction: Reaction?,
     val deleteTargetTimestamp: Long?,
     val sticker: Boolean,
+    val stickerAttachment: AttachmentPointer? = null,
+    val stickerEmoji: String? = null,
 ) {
     companion object {
         fun decode(m: ProtoMessage) = DataMessage(
@@ -114,6 +128,8 @@ data class DataMessage(
             reaction = m.msg(16)?.let { Reaction(it.string(1) ?: "", it.bool(2) ?: false, it.string(4), it.long(5) ?: 0) },
             deleteTargetTimestamp = m.msg(17)?.long(1),
             sticker = m.has(11),
+            stickerAttachment = m.msg(11)?.msg(4)?.let { AttachmentPointer.decode(it) },
+            stickerEmoji = m.msg(11)?.string(5),
         )
     }
 }
@@ -129,9 +145,10 @@ object Content {
     const val DECRYPTION_ERROR = 8
     const val STORY = 9
 
-    fun dataMessage(body: String, timestamp: Long, profileKey: ByteArray?, groupMasterKey: ByteArray? = null,
-                    groupRevision: Int? = null, quote: Quote? = null): ProtoWriter {
-        val dm = ProtoWriter().string(1, body)
+    fun dataMessage(body: String?, timestamp: Long, profileKey: ByteArray?, groupMasterKey: ByteArray? = null,
+                    groupRevision: Int? = null, quote: Quote? = null, attachments: List<OutAttachment> = emptyList()): ProtoWriter {
+        val dm = ProtoWriter().string(1, body?.takeIf { it.isNotEmpty() })
+        attachments.forEach { dm.message(2, it.encode()) }
         if (groupMasterKey != null) dm.message(15, ProtoWriter().bytes(1, groupMasterKey).uint(2, groupRevision ?: 0))
         dm.bytes(6, profileKey)
         if (quote != null) dm.message(8, ProtoWriter().uint(1, quote.id).string(5, quote.authorUuid).string(3, quote.text))

@@ -9,6 +9,12 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import io.github.kotbctakahe.hys1link.core.LinkStickers
+import androidx.compose.material.icons.rounded.AddPhotoAlternate
+import androidx.compose.material.icons.rounded.EmojiEmotions
+import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -113,6 +119,22 @@ fun ChatScreen(core: Core, convId: String, onBack: () -> Unit) {
     var replyTo by remember { mutableStateOf<Message?>(null) }
     val listState = rememberLazyListState()
     val self = core.account.aci
+    var stickersOpen by remember { mutableStateOf(false) }
+    val ctxPick = LocalContext.current
+    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(10)) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        val caption = draft.trim().takeIf { it.isNotEmpty() }
+        draft = ""
+        val q = replyTo?.let { Quote(it.sentTs, it.author, it.body) }; replyTo = null
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val files = uris.mapNotNull { u -> MediaPrep.image(ctxPick, u) }
+                if (files.isEmpty()) error("Не удалось прочитать файл")
+                core.sender.sendMessage(convId, caption, files, q)
+            }.onFailure { e -> withContext(Dispatchers.Main) { snackbar.showSnackbar("Фото не отправлено: ${e.message}") } }
+        }
+    }
+    LaunchedEffect(convId) { core.repo.conversation(convId)?.let { if (it.kind == ConvKind.GROUP) core.groups.refreshTitleAsync(it) } }
 
     DisposableEffect(convId) {
         core.notifications.visibleConversation = convId
@@ -163,8 +185,19 @@ fun ChatScreen(core: Core, convId: String, onBack: () -> Unit) {
             )
         },
         bottomBar = {
+            Column {
+            if (stickersOpen) StickerPanel(core) { item ->
+                stickersOpen = false
+                scope.launch(Dispatchers.IO) {
+                    val ts = System.currentTimeMillis()
+                    runCatching { core.sender.sendMessage(convId, LinkStickers.build(item, ts), emptyList(), null, ts) }
+                        .onFailure { e -> withContext(Dispatchers.Main) { snackbar.showSnackbar("Стикер не отправлен: ${e.message}") } }
+                }
+            }
             Composer(
                 draft = draft, onDraft = { draft = it }, replyTo = replyTo,
+                stickersOpen = stickersOpen, onToggleStickers = { stickersOpen = !stickersOpen },
+                onAttach = { pickMedia.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                 replyAuthor = replyTo?.let { authorName(core, it) }, onCancelReply = { replyTo = null },
                 onSend = {
                     val text = draft.trim()
@@ -178,6 +211,7 @@ fun ChatScreen(core: Core, convId: String, onBack: () -> Unit) {
                     }
                 }
             )
+            }
         }
     ) { pad ->
         val reversed = messages.asReversed()
@@ -244,8 +278,33 @@ private fun Bubble(
     val shape = if (out) RoundedCornerShape(big, big, if (tail) small else big, big)
                 else RoundedCornerShape(big, big, big, if (tail) small else big)
 
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (out) Arrangement.End else Arrangement.Start) {
+    val linkSticker = remember(m.body, m.sentTs) { m.body?.let { LinkStickers.parse(it, m.sentTs) } }
+    val signalSticker = m.attachments.singleOrNull()?.takeIf { it.fileName == "sticker.webp" }
+    val isSticker = !m.deleted && (linkSticker != null || (signalSticker != null && m.body.isNullOrEmpty()))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (out) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Bottom) {
+        if (isGroup && !out) {
+            if (tail && m.author != null) {
+                val ct = remember(m.author) { core.repo.contact(m.author) }
+                Avatar(ct?.displayName ?: "?", m.author, ct?.avatarPath, 30.dp)
+            } else Spacer(Modifier.width(30.dp))
+            Spacer(Modifier.width(6.dp))
+        }
         Box {
+            if (isSticker) {
+                Column(horizontalAlignment = if (out) Alignment.End else Alignment.Start,
+                    modifier = Modifier.combinedClickable(onClick = {}, onLongClick = { menu = true })) {
+                    if (showAuthor && m.author != null) Text(core.repo.contact(m.author)?.displayName ?: "Участник",
+                        style = MaterialTheme.typography.labelLarge, color = avatarColor(m.author))
+                    val model: Any? = linkSticker?.url ?: signalSticker?.localPath?.let { File(it) }
+                    if (model != null) coil.compose.AsyncImage(model, linkSticker?.emoji ?: "Стикер", Modifier.size(150.dp))
+                    else Box(Modifier.size(150.dp), contentAlignment = Alignment.Center) { Text(linkSticker?.emoji ?: "🧩", style = MaterialTheme.typography.displayMedium) }
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clip(RoundedCornerShape(10.dp))
+                        .background(scheme.surfaceContainerLowest.copy(alpha = 0.8f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                        Text(clock(m.sentTs), style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
+                        if (out) { Spacer(Modifier.width(4.dp)); StatusIcon(m.status, scheme.onSurfaceVariant) }
+                    }
+                }
+            } else
             Column(horizontalAlignment = if (out) Alignment.End else Alignment.Start) {
                 Surface(
                     shape = shape, color = bg, tonalElevation = 0.dp, shadowElevation = if (out) 0.dp else 1.dp,
@@ -372,6 +431,7 @@ private fun AttachmentView(core: Core, messageId: Long, index: Int, a: Attachmen
 private fun Composer(
     draft: String, onDraft: (String) -> Unit, replyTo: Message?, replyAuthor: String?,
     onCancelReply: () -> Unit, onSend: () -> Unit,
+    stickersOpen: Boolean = false, onToggleStickers: () -> Unit = {}, onAttach: () -> Unit = {},
 ) {
     Surface(color = Color.Transparent) {
         Column(Modifier.navigationBarsPadding().imePadding().padding(horizontal = 8.dp, vertical = 6.dp)
@@ -388,6 +448,10 @@ private fun Composer(
                 }
             }
             Row(Modifier.padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.Bottom) {
+                IconButton(onClick = onToggleStickers, modifier = Modifier.padding(bottom = 2.dp)) {
+                    Icon(if (stickersOpen) Icons.Rounded.Keyboard else Icons.Rounded.EmojiEmotions, if (stickersOpen) "Скрыть стикеры" else "Стикеры",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 TextField(
                     value = draft, onValueChange = onDraft, placeholder = { Text("Сообщение") },
                     modifier = Modifier.weight(1f).heightIn(min = 52.dp, max = 160.dp),
@@ -398,7 +462,10 @@ private fun Composer(
                         unfocusedContainerColor = Color.Transparent,
                     ),
                 )
-                Spacer(Modifier.width(8.dp))
+                if (draft.isBlank()) IconButton(onClick = onAttach, modifier = Modifier.padding(bottom = 2.dp)) {
+                    Icon(Icons.Rounded.AddPhotoAlternate, "Отправить фото", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Spacer(Modifier.width(4.dp))
                 val enabled = draft.isNotBlank()
                 val sendBg by animateColorAsState(if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest, label = "send")
                 Box(

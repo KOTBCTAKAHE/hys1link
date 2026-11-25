@@ -4,7 +4,6 @@ import android.util.Log
 import io.github.kotbctakahe.hys1link.LinkConfig
 import io.github.kotbctakahe.hys1link.crypto.B64
 import io.github.kotbctakahe.hys1link.net.ApiException
-import io.github.kotbctakahe.hys1link.proto.Content
 import io.github.kotbctakahe.hys1link.proto.ProtoMessage
 import io.github.kotbctakahe.hys1link.store.Conversation
 import io.github.kotbctakahe.hys1link.store.MsgStatus
@@ -40,9 +39,11 @@ class Groups(private val core: Core) {
 
     fun cached(convId: String): GroupState? = core.repo.db.getString("group:$convId")?.let { parse(it) }
 
-    fun refreshTitleAsync(conv: Conversation) {
+    fun refreshAll() { core.repo.groupConversations().forEach { refreshTitleAsync(it) } }
+
+    fun refreshTitleAsync(conv: Conversation, force: Boolean = false) {
         val last = core.repo.db.getLong("group_ts:${conv.id}")
-        if (System.currentTimeMillis() - last < 6 * 3600_000L && cached(conv.id) != null) return
+        if (!force && System.currentTimeMillis() - last < 6 * 3600_000L && cached(conv.id) != null) return
         if (!inFlight.add(conv.id)) return
         core.scope.launchIo {
             try { refresh(conv) } catch (e: Exception) { Log.w(TAG, "group refresh failed", e) } finally { inFlight.remove(conv.id) }
@@ -81,15 +82,27 @@ class Groups(private val core: Core) {
                 GroupMember(uuid.toString(), pk)
             }.getOrNull()
         }
+        // Group avatar: CDN path at tag 3, content = encryptBlob(GroupAttributeBlob{2: avatar bytes})
+        g.string(3)?.takeIf { it.isNotBlank() }?.let { path ->
+            if (core.repo.db.getString("group_avatar_src:${conv.id}") != path) runCatching {
+                val enc = core.api.downloadProfileAvatar(path)
+                val img = ProtoMessage.parse(cipher.decryptBlob(enc)).bytes(2) ?: error("empty avatar blob")
+                val f = java.io.File(core.context.filesDir, "avatars/group_${conv.id.removePrefix("g:")}.jpg").apply { parentFile?.mkdirs() }
+                f.writeBytes(img)
+                core.repo.setConversationAvatar(conv.id, f.absolutePath)
+                core.repo.db.putString("group_avatar_src:${conv.id}", path)
+            }.onFailure { Log.w(TAG, "group avatar failed", it) }
+        }
         val state = GroupState(title, g.int(6) ?: 0, members, description)
         core.repo.db.putString("group:${conv.id}", serialize(state))
         core.repo.db.putLong("group_ts:${conv.id}", System.currentTimeMillis())
         core.repo.renameConversation(conv.id, title)
         members.forEach { m ->
-            if (m.uuid != core.account.aci && core.repo.contact(m.uuid)?.profileKey == null) {
-                core.repo.upsertContact(m.uuid, profileKey = m.profileKey)
-                if (m.profileKey != null) core.profiles.refreshAsync(m.uuid)
-            }
+            if (m.uuid == core.account.aci) return@forEach
+            val known = core.repo.contact(m.uuid)
+            if (known?.profileKey == null && m.profileKey != null) core.repo.upsertContact(m.uuid, profileKey = m.profileKey)
+            else if (known == null) core.repo.upsertContact(m.uuid)
+            if ((known?.profileKey ?: m.profileKey) != null && (known?.avatarPath == null || known.profileName == null)) core.profiles.refreshAsync(m.uuid)
         }
         return state
     }
@@ -121,26 +134,6 @@ class Groups(private val core: Core) {
             if (t == today) result = c
         }
         return result ?: error("Сервер не выдал групповую учётку на сегодня")
-    }
-
-    /** Sends a text to every member individually (Signal "legacy" group fan-out). */
-    fun sendText(conv: Conversation, body: String) {
-        val self = core.account.aci ?: return
-        val state = cached(conv.id) ?: refresh(conv)
-        val ts = System.currentTimeMillis()
-        val msgId = core.repo.insertMessage(conv.id, self, true, body, ts, MsgStatus.PENDING)
-        val mk = conv.groupMasterKey!!
-        var delivered = 0
-        state.members.filter { it.uuid != self }.forEach { m ->
-            runCatching {
-                core.sender.sendContent(m.uuid, Content.withData(Content.dataMessage(body, ts, core.account.profileKey, mk, state.revision)), ts)
-                delivered++
-            }.onFailure { Log.w(TAG, "group send to ${m.uuid} failed", it) }
-        }
-        runCatching {
-            core.sender.sendContent(self, Content.syncSent(null, ts, Content.dataMessage(body, ts, core.account.profileKey, mk, state.revision)), ts, urgent = false)
-        }
-        core.repo.setStatus(msgId, if (delivered > 0 || state.members.size <= 1) MsgStatus.SENT else MsgStatus.FAILED)
     }
 
     private fun serialize(s: GroupState) = JSONObject()

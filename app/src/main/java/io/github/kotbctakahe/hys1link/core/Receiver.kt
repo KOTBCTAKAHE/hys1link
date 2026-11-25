@@ -157,8 +157,10 @@ class Receiver(private val core: Core) {
 
         val atts = dm.attachments.map { a ->
             AttachmentInfo(a.contentType, a.fileName, a.size, null, a.width, a.height, pointerJson(a))
-        }
-        val body = dm.body ?: if (dm.sticker) "🧩 Стикер" else null
+        } + listOfNotNull(dm.stickerAttachment?.let { a ->
+            AttachmentInfo(a.contentType ?: "image/webp", STICKER_FILE, a.size, null, a.width, a.height, pointerJson(a))
+        })
+        val body = dm.body ?: if (dm.sticker && dm.stickerAttachment == null) "🧩 ${dm.stickerEmoji ?: "Стикер"}" else null
         if (body.isNullOrEmpty() && atts.isEmpty()) return
 
         val id = repo.insertMessage(
@@ -222,5 +224,9 @@ class Receiver(private val core: Core) {
         Log.i(TAG, "contact sync: $count contacts")
     }
 
-    companion object { private const val TAG = "Receiver" }
+    companion object {
+        private const val TAG = "Receiver"
+        /** Marks an attachment that is a Signal sticker image (rendered without a bubble). */
+        const val STICKER_FILE = "sticker.webp"
+    }
 }

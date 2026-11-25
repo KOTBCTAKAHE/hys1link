@@ -20,6 +20,9 @@ class App : Application(), ImageLoaderFactory {
         .okHttpClient { Http.client(this) }
         .memoryCache { MemoryCache.Builder(this).maxSizePercent(0.2).build() }
         .diskCache { DiskCache.Builder().directory(cacheDir.resolve("images")).maxSizeBytes(256L * 1024 * 1024).build() }
+        .components {
+            if (android.os.Build.VERSION.SDK_INT >= 28) add(coil.decode.ImageDecoderDecoder.Factory()) else add(coil.decode.GifDecoder.Factory())
+        }
         .crossfade(true)
         .build()
 }

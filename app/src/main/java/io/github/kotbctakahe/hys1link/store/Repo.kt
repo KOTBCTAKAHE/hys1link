@@ -96,6 +96,14 @@ class Repo(val db: Db) {
         w.execSQL("UPDATE conversations SET title=? WHERE id=?", arrayOf(title, id)); db.notifyChanged()
     }
 
+    fun setConversationAvatar(id: String, path: String?) {
+        w.execSQL("UPDATE conversations SET avatar_path=? WHERE id=?", arrayOf(path, id)); db.notifyChanged()
+    }
+
+    fun groupConversations(): List<Conversation> = r.rawQuery(
+        "SELECT c.*, c.avatar_path AS avatar FROM conversations c WHERE c.kind=1", null
+    ).use { c -> buildList { while (c.moveToNext()) add(c.toConversation()) } }
+
     fun setPinned(id: String, pinned: Boolean) {
         w.execSQL("UPDATE conversations SET pinned=? WHERE id=?", arrayOf(if (pinned) 1 else 0, id)); db.notifyChanged()
     }
@@ -105,11 +113,11 @@ class Repo(val db: Db) {
     }
 
     fun conversation(id: String): Conversation? = r.rawQuery(
-        "SELECT c.*, k.avatar_path AS avatar FROM conversations c LEFT JOIN contacts k ON k.uuid=c.peer WHERE c.id=?", arrayOf(id)
+        "SELECT c.*, COALESCE(k.avatar_path, c.avatar_path) AS avatar FROM conversations c LEFT JOIN contacts k ON k.uuid=c.peer WHERE c.id=?", arrayOf(id)
     ).use { if (it.moveToFirst()) it.toConversation() else null }
 
     fun conversations(): List<Conversation> = r.rawQuery(
-        "SELECT c.*, k.avatar_path AS avatar FROM conversations c LEFT JOIN contacts k ON k.uuid=c.peer " +
+        "SELECT c.*, COALESCE(k.avatar_path, c.avatar_path) AS avatar FROM conversations c LEFT JOIN contacts k ON k.uuid=c.peer " +
             "WHERE c.archived=0 AND (c.last_ts>0 OR c.kind=2) ORDER BY c.pinned DESC, c.last_ts DESC", null
     ).use { c -> buildList { while (c.moveToNext()) add(c.toConversation()) } }
 
@@ -138,7 +146,11 @@ class Repo(val db: Db) {
         }
         val id = w.insertWithOnConflict("messages", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
         if (id == -1L) return -1
-        val preview = body?.takeIf { it.isNotBlank() } ?: attachments.firstOrNull()?.let { previewFor(it) } ?: ""
+        val preview = when {
+            body != null && body.startsWith("/link=") -> "🧩 Стикер"
+            !body.isNullOrBlank() -> body
+            else -> attachments.firstOrNull()?.let { previewFor(it) } ?: ""
+        }
         w.execSQL(
             "UPDATE conversations SET last_body=?, last_ts=MAX(last_ts, ?), archived=0, unread=unread+? WHERE id=?",
             arrayOf(preview, sentTs, if (countUnread) 1 else 0, conv)
@@ -148,6 +160,7 @@ class Repo(val db: Db) {
     }
 
     private fun previewFor(a: AttachmentInfo): String = when {
+        a.fileName == "sticker.webp" -> "🧩 Стикер"
         a.contentType?.startsWith("image/") == true -> "🖼 Фото"
         a.contentType?.startsWith("video/") == true -> "🎬 Видео"
         a.contentType?.startsWith("audio/") == true -> "🎤 Голосовое"

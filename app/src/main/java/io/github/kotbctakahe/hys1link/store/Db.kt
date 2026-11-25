@@ -8,7 +8,7 @@ import android.database.sqlite.SQLiteOpenHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-class Db(context: Context) : SQLiteOpenHelper(context, "hys1link.db", null, 1) {
+class Db(context: Context) : SQLiteOpenHelper(context, "hys1link.db", null, 2) {
 
     /** Incremented on every write that the UI may care about. */
     private val _version = MutableStateFlow(0L)
@@ -32,7 +32,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, "hys1link.db", null, 1) {
         db.execSQL(
             """CREATE TABLE conversations (
                 id TEXT PRIMARY KEY, kind INTEGER NOT NULL, peer TEXT, group_master_key BLOB, title TEXT,
-                last_body TEXT, last_ts INTEGER DEFAULT 0, unread INTEGER DEFAULT 0, archived INTEGER DEFAULT 0, pinned INTEGER DEFAULT 0)"""
+                last_body TEXT, last_ts INTEGER DEFAULT 0, unread INTEGER DEFAULT 0, archived INTEGER DEFAULT 0, pinned INTEGER DEFAULT 0, avatar_path TEXT)"""
         )
         db.execSQL(
             """CREATE TABLE messages (
@@ -45,7 +45,9 @@ class Db(context: Context) : SQLiteOpenHelper(context, "hys1link.db", null, 1) {
         db.execSQL("CREATE INDEX messages_ts ON messages(sent_ts)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) db.execSQL("ALTER TABLE conversations ADD COLUMN avatar_path TEXT")
+    }
 
     // ---- key/value ----
     fun putBlob(k: String, v: ByteArray?) {

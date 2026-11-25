@@ -84,6 +84,11 @@ class Core private constructor(val context: Context) {
         loop = scope.launchIo {
             var backoff = 2_000L
             launchIo { runCatching { keys.refreshPreKeys() }.onFailure { Log.w(TAG, "prekeys", it) } }
+            launchIo { runCatching { groups.refreshAll() } }
+            launchIo {
+                // fill in missing names/avatars for known contacts
+                runCatching { repo.contacts().filter { it.profileKey != null && it.avatarPath == null }.take(60).forEach { profiles.refreshAsync(it.uuid) } }
+            }
             while (isActive && account.isLinked) {
                 val socket = ChatSocket(http, account.creds()!!, { req -> receiver.handle(req) }) { s ->
                     _conn.value = when (s) {

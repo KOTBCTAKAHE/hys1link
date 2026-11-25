@@ -61,7 +61,7 @@ class Attachments(private val core: Core) {
     fun autoDownload(messageId: Long, list: List<AttachmentInfo>) {
         list.forEachIndexed { i, a ->
             val small = (a.size ?: 0) <= maxAuto
-            val media = a.contentType?.startsWith("image/") == true || a.contentType?.startsWith("audio/") == true
+            val media = a.contentType?.startsWith("image/") == true || a.contentType?.startsWith("audio/") == true || a.fileName == "sticker.webp"
             if (small && media) core.scope.launchIo { runCatching { download(messageId, i, a) }.onFailure { Log.w("Attachments", "dl failed", it) } }
         }
     }

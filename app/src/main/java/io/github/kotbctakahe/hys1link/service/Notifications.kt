@@ -51,7 +51,13 @@ class Notifications(private val context: Context, private val core: Core) {
             .setGroupConversation(conv.kind == 1)
         unread.forEach { m ->
             val author = m.author?.let { core.repo.contact(it)?.displayName } ?: conv.title
-            style.addMessage(m.body ?: "📎 Вложение", m.sentTs, Person.Builder().setName(author).build())
+            val text = when {
+                m.body?.startsWith("/link=") == true -> "🧩 Стикер"
+                m.body != null -> m.body
+                m.attachments.firstOrNull()?.contentType?.startsWith("image/") == true -> "🖼 Фото"
+                else -> "📎 Вложение"
+            }
+            style.addMessage(text, m.sentTs, Person.Builder().setName(author).build())
         }
         val n = NotificationCompat.Builder(context, CH_MESSAGES)
             .setSmallIcon(R.drawable.ic_stat_link)
