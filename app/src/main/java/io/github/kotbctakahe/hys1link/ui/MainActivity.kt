@@ -21,19 +21,26 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
+import androidx.navigation.navArgument
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import io.github.kotbctakahe.hys1link.core.Core
 import io.github.kotbctakahe.hys1link.service.ConnectionService
 import io.github.kotbctakahe.hys1link.ui.screens.ChatScreen
-import io.github.kotbctakahe.hys1link.ui.screens.ChatsScreen
+import io.github.kotbctakahe.hys1link.ui.screens.PostScreen
+import io.github.kotbctakahe.hys1link.ui.screens.ProfileKey
+import io.github.kotbctakahe.hys1link.ui.screens.SocialProfileScreen
 import io.github.kotbctakahe.hys1link.ui.screens.LinkScreen
 import io.github.kotbctakahe.hys1link.ui.screens.NewChatScreen
 import io.github.kotbctakahe.hys1link.ui.screens.SettingsScreen
 import io.github.kotbctakahe.hys1link.ui.theme.Hys1Theme
 import java.net.URLDecoder
 import java.net.URLEncoder
+
+private fun userRoute(k: ProfileKey): String =
+    "user?id=${k.userId ?: -1}" + (k.uuid?.let { "&uuid=" + URLEncoder.encode(it, "UTF-8") } ?: "")
 
 class MainActivity : ComponentActivity() {
     private val pendingConv = mutableStateOf<String?>(null)
@@ -67,17 +74,33 @@ class MainActivity : ComponentActivity() {
                             if (target != null) { nav.navigate("chat/" + URLEncoder.encode(target, "UTF-8")); pendingConv.value = null }
                         }
                         NavHost(
-                            nav, startDestination = "chats",
+                            nav, startDestination = "home",
                             enterTransition = { slideInHorizontally { it / 4 } + fadeIn() },
                             exitTransition = { fadeOut() },
                             popEnterTransition = { fadeIn() },
                             popExitTransition = { slideOutHorizontally { it / 4 } + fadeOut() },
                         ) {
-                            composable("chats") {
-                                ChatsScreen(core,
-                                    onOpen = { nav.navigate("chat/" + URLEncoder.encode(it, "UTF-8")) },
-                                    onNewChat = { nav.navigate("new") },
-                                    onSettings = { nav.navigate("settings") })
+                            composable("home") {
+                                HomeShell(core,
+                                    openChat = { nav.navigate("chat/" + URLEncoder.encode(it, "UTF-8")) },
+                                    openNewChat = { nav.navigate("new") },
+                                    openSettings = { nav.navigate("settings") },
+                                    openPost = { nav.navigate("post/" + URLEncoder.encode(it, "UTF-8")) },
+                                    openUser = { k -> nav.navigate(userRoute(k)) })
+                            }
+                            composable("post/{id}") { e ->
+                                PostScreen(core, URLDecoder.decode(e.arguments?.getString("id") ?: "", "UTF-8"), onBack = { nav.popBackStack() },
+                                    onOpenUser = { k -> nav.navigate(userRoute(k)) })
+                            }
+                            composable("user?id={id}&uuid={uuid}", arguments = listOf(
+                                navArgument("id") { type = NavType.StringType; defaultValue = "-1" },
+                                navArgument("uuid") { type = NavType.StringType; nullable = true; defaultValue = null },
+                            )) { e ->
+                                val id = e.arguments?.getString("id")?.toIntOrNull()?.takeIf { it >= 0 }
+                                val uuid = e.arguments?.getString("uuid")?.takeIf { it.isNotBlank() }
+                                SocialProfileScreen(core, ProfileKey(id, uuid), onBack = { nav.popBackStack() },
+                                    onOpenPost = { nav.navigate("post/" + URLEncoder.encode(it, "UTF-8")) },
+                                    onMessage = { u -> nav.navigate("chat/" + URLEncoder.encode(core.repo.ensureDirect(u, core.account.aci).id, "UTF-8")) })
                             }
                             composable("chat/{id}") { e ->
                                 val id = URLDecoder.decode(e.arguments?.getString("id") ?: "", "UTF-8")

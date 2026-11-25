@@ -10,6 +10,10 @@ object LinkConfig {
         2 to "https://cdn-gcp.linkmessenger.me",
         3 to "https://cdn-aws.linkmessenger.me",
     )
+    const val SOCIAL_URL = "https://social.linkm.me"
+    const val SOCIAL_CDN_URL = "https://img.linkm.me"
+    const val LINK_VERSION_NAME = "7.4.4"
+    const val LINK_VERSION_CODE = "751500"
     const val STORAGE_URL = "https://stg.linkmessenger.me"
     const val UNIDENTIFIED_SENDER_TRUST_ROOT = "BbZ54gjdnxB0L39NHJSzTaO3J5q4MYjQ6pHccGylMbw2"
     const val ZKGROUP_SERVER_PUBLIC_PARAMS =

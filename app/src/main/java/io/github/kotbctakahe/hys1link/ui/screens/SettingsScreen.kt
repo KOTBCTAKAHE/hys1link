@@ -123,6 +123,9 @@ fun SettingsScreen(core: Core, onBack: () -> Unit, onThemeChanged: () -> Unit) {
                 modifier = Modifier.padding(vertical = 8.dp)
             )
 
+            Section("Перенос истории")
+            BackupImportSection(core)
+
             Section("Синхронизация")
             OutlinedButton(onClick = {
                 syncNote = "Запрос отправлен на телефон"

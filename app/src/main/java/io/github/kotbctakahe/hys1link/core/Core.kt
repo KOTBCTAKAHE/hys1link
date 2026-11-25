@@ -39,6 +39,7 @@ class Core private constructor(val context: Context) {
     val attachments = Attachments(this)
     val groups = Groups(this)
     val notifications = Notifications(context, this)
+    val social = io.github.kotbctakahe.hys1link.social.SocialClient(this)
 
     @Volatile var store: ProtocolStore? = null
         private set
